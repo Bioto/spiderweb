@@ -3,7 +3,7 @@
 Defines the interface for vector storage implementations.
 """
 
-from typing import Protocol, runtime_checkable
+from typing import Literal, Protocol, runtime_checkable
 
 from spiderweb.models.document import Chunk
 
@@ -61,6 +61,28 @@ class VectorStore(Protocol):
 
         Returns:
             List of chunks (may be shorter if some IDs not found)
+        """
+        ...
+
+    async def get_by_position(
+        self,
+        document_id: str,
+        position_start: int,
+        position_end: int,
+        position_field: Literal["chunk_index", "page_number"] = "chunk_index",
+    ) -> list[Chunk]:
+        """Retrieve chunks by position range within a document.
+        
+        Used for context window retrieval to get surrounding chunks.
+
+        Args:
+            document_id: Document to search within
+            position_start: Starting position (inclusive)
+            position_end: Ending position (inclusive)
+            position_field: Whether to use chunk_index or page_number
+
+        Returns:
+            List of chunks in the position range, sorted by position
         """
         ...
 

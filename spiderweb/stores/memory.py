@@ -3,6 +3,8 @@
 Simple implementation that stores chunks in memory without persistence.
 """
 
+from typing import Literal
+
 from spiderweb.models.document import Chunk
 from spiderweb.observability.logging_config import get_logger
 
@@ -142,3 +144,53 @@ class MemoryVectorStore:
         count = len(self._chunks)
         self._chunks.clear()
         logger.info(f"Cleared {count} chunks from memory store")
+
+    async def get_by_position(
+        self,
+        document_id: str,
+        position_start: int,
+        position_end: int,
+        position_field: Literal["chunk_index", "page_number"] = "chunk_index",
+    ) -> list[Chunk]:
+        """Retrieve chunks by position range within a document.
+
+        Args:
+            document_id: Document to search within
+            position_start: Starting position (inclusive)
+            position_end: Ending position (inclusive)
+            position_field: Whether to use chunk_index or page_number
+
+        Returns:
+            List of chunks in the position range, sorted by position
+        """
+        result_chunks = []
+
+        for chunk in self._chunks.values():
+            # Filter by document_id
+            if chunk.metadata.document_id != document_id:
+                continue
+
+            # Filter by position range
+            if position_field == "chunk_index":
+                pos = chunk.metadata.chunk_index
+                if position_start <= pos <= position_end:
+                    result_chunks.append(chunk)
+            elif position_field == "page_number":
+                # Check if any page_number in range
+                if chunk.metadata.page_numbers:
+                    if any(position_start <= page <= position_end for page in chunk.metadata.page_numbers):
+                        result_chunks.append(chunk)
+
+        # Sort by position
+        if position_field == "chunk_index":
+            result_chunks.sort(key=lambda c: c.metadata.chunk_index)
+        elif position_field == "page_number":
+            # Sort by first page number
+            result_chunks.sort(key=lambda c: c.metadata.page_numbers[0] if c.metadata.page_numbers else 0)
+
+        logger.debug(
+            f"Retrieved {len(result_chunks)} chunks by {position_field} "
+            f"range [{position_start}, {position_end}] for document {document_id}"
+        )
+
+        return result_chunks

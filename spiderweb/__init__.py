@@ -43,7 +43,7 @@ Configuration:
 
 from spiderweb.api import Spiderweb, ingest, process_directory, query
 from spiderweb.config import SpiderwebSettings, get_settings, settings
-from spiderweb.models.config import ChunkerConfig, ValidatorConfig, VectorStoreConfig
+from spiderweb.models.config import ChunkerConfig, ValidatorConfig, VectorStoreConfig, ContextWindowConfig
 
 __all__ = [
     # Main API
@@ -58,6 +58,7 @@ __all__ = [
     "ChunkerConfig",
     "ValidatorConfig",
     "VectorStoreConfig",
+    "ContextWindowConfig",
 ]
 
 __version__ = "0.1.0"

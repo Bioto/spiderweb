@@ -9,6 +9,7 @@ from rich.panel import Panel
 
 from spiderweb.api import Spiderweb
 from spiderweb.config import settings
+from spiderweb.models.config import ContextWindowConfig
 
 console = Console()
 
@@ -38,12 +39,40 @@ console = Console()
     is_flag=True,
     help="Show similarity scores",
 )
+@click.option(
+    "--context-before",
+    type=int,
+    default=None,
+    help="Number of chunks/pages before each match to include as context",
+)
+@click.option(
+    "--context-after",
+    type=int,
+    default=None,
+    help="Number of chunks/pages after each match to include as context",
+)
+@click.option(
+    "--context-mode",
+    type=click.Choice(["page", "chunk"]),
+    default=None,
+    help="Context retrieval mode (page-first or chunk-based)",
+)
+@click.option(
+    "--semantic-guide",
+    type=str,
+    default=None,
+    help="Prompt to guide semantic context selection",
+)
 def query_cmd(
     query_text: str,
     store: str | None,
     top_k: int,
     embedding_model: str | None,
     show_scores: bool,
+    context_before: int | None,
+    context_after: int | None,
+    context_mode: str | None,
+    semantic_guide: str | None,
 ):
     """Query the vector store.
 
@@ -60,8 +89,28 @@ def query_cmd(
       \b
       # Query specific Qdrant collection
       spiderweb query "How to deploy?" --store qdrant://localhost:6333/docs
+      
+      \b
+      # Query with surrounding context
+      spiderweb query "revenue Q4" --context-before 3 --context-after 3 --context-mode page
+      
+      \b
+      # Query with semantic guidance
+      spiderweb query "revenue Q4" --semantic-guide "financial metrics and KPIs"
     """
-    asyncio.run(_query(query_text, store, top_k, embedding_model, show_scores))
+    asyncio.run(
+        _query(
+            query_text,
+            store,
+            top_k,
+            embedding_model,
+            show_scores,
+            context_before,
+            context_after,
+            context_mode,
+            semantic_guide,
+        )
+    )
 
 
 async def _query(
@@ -70,6 +119,10 @@ async def _query(
     top_k: int,
     embedding_model: str | None,
     show_scores: bool,
+    context_before: int | None,
+    context_after: int | None,
+    context_mode: str | None,
+    semantic_guide: str | None,
 ):
     """Async query implementation."""
     # Create LLM client
@@ -84,11 +137,22 @@ async def _query(
     # Create Spiderweb client
     web = Spiderweb(llm_client=llm, vector_store_url=store_url)
 
+    # Build context window config if any context options provided
+    context_window = None
+    if context_before is not None or context_after is not None or semantic_guide is not None:
+        context_window = ContextWindowConfig(
+            enabled=True,
+            chunks_before=context_before if context_before is not None else 2,
+            chunks_after=context_after if context_after is not None else 2,
+            context_mode=context_mode if context_mode else "page",
+            semantic_guide=semantic_guide,
+        )
+
     try:
         console.print(f"[cyan]Querying: {query_text}[/cyan]\n")
 
         with console.status("[bold cyan]Searching..."):
-            result = await web.query(query_text, top_k=top_k)
+            result = await web.query(query_text, top_k=top_k, context_window=context_window)
 
         if not result.chunks:
             console.print("[yellow]No results found[/yellow]")
@@ -110,6 +174,19 @@ async def _query(
 
             # Add metadata
             metadata_str = f"\n[dim]Document: {chunk['document_id']} | Chunk: {chunk['chunk_index']}[/dim]"
+
+            # Add context info if available
+            if context_window and hasattr(result, "context_by_match"):
+                match_context = result.context_by_match.get(idx - 1)
+                if match_context:
+                    context_info = (
+                        f"\n[dim]Context: {len(match_context.chunks)} chunks "
+                        f"(window: {match_context.final_window_size[0]}/{match_context.final_window_size[1]})"
+                    )
+                    if match_context.expansion_steps_used > 0:
+                        context_info += f", {match_context.expansion_steps_used} expansions"
+                    context_info += "[/dim]"
+                    metadata_str += context_info
 
             panel = Panel(
                 content + metadata_str,

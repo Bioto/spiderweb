@@ -239,3 +239,61 @@ class QueryResult(BaseModel):
                 "total_results": 1,
             }
         }
+
+
+class ContextChunk(BaseModel):
+    """A chunk returned as context for a match.
+    
+    Includes position offset relative to match and optional semantic scoring.
+    """
+
+    chunk: dict[str, Any] = Field(
+        description="The chunk data with content and metadata",
+    )
+    position_offset: int = Field(
+        description="Position relative to match (-2, -1, 0 for match, +1, +2)",
+    )
+    semantic_score: float | None = Field(
+        default=None,
+        description="Semantic similarity score if semantic guide was used",
+    )
+    from_expansion: bool = Field(
+        default=False,
+        description="True if this chunk was found via adaptive expansion",
+    )
+
+
+class MatchContext(BaseModel):
+    """Context for a single match, with expansion metadata.
+    
+    Contains all context chunks for a match and information about
+    how the context was retrieved.
+    """
+
+    chunks: list[ContextChunk] = Field(
+        description="Context chunks surrounding the match",
+    )
+    expansion_steps_used: int = Field(
+        default=0,
+        description="Number of expansion steps needed to find relevant context",
+    )
+    final_window_size: tuple[int, int] = Field(
+        default=(0, 0),
+        description="Final window size (before, after) after any expansion",
+    )
+
+
+class QueryResultWithContext(QueryResult):
+    """Query result with surrounding context chunks.
+    
+    Extends QueryResult with context information for each match.
+    """
+
+    context_by_match: dict[int, MatchContext] = Field(
+        default_factory=dict,
+        description="Context chunks grouped by match index",
+    )
+    all_context_chunks: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="All context chunks deduplicated across matches",
+    )

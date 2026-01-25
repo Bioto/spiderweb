@@ -3,7 +3,7 @@
 Provides persistent vector storage using Qdrant.
 """
 
-from typing import Any
+from typing import Any, Literal
 
 from qdrant_client import AsyncQdrantClient
 from qdrant_client.http import models as qmodels
@@ -357,3 +357,86 @@ class QdrantVectorStore:
         )
 
         logger.info(f"Cleared collection {self.collection_name}")
+
+    async def get_by_position(
+        self,
+        document_id: str,
+        position_start: int,
+        position_end: int,
+        position_field: Literal["chunk_index", "page_number"] = "chunk_index",
+    ) -> list[Chunk]:
+        """Retrieve chunks by position range within a document.
+
+        Args:
+            document_id: Document to search within
+            position_start: Starting position (inclusive)
+            position_end: Ending position (inclusive)
+            position_field: Whether to use chunk_index or page_number
+
+        Returns:
+            List of chunks in the position range, sorted by position
+        """
+        await self.initialize()
+
+        # Build filter for document_id and position range
+        must_conditions = [
+            qmodels.FieldCondition(
+                key="document_id",
+                match=qmodels.MatchValue(value=document_id),
+            )
+        ]
+
+        # Add range condition based on position field
+        if position_field == "chunk_index":
+            must_conditions.append(
+                qmodels.FieldCondition(
+                    key="chunk_index",
+                    range=qmodels.Range(
+                        gte=position_start,
+                        lte=position_end,
+                    ),
+                )
+            )
+        elif position_field == "page_number":
+            # For page_numbers (list field), we need to check if any value is in range
+            # Qdrant doesn't have built-in list intersection, so we scroll and filter
+            pass
+
+        query_filter = qmodels.Filter(must=must_conditions)
+
+        # Use scroll to get all matching points
+        points, _next_offset = await self.client.scroll(
+            collection_name=self.collection_name,
+            scroll_filter=query_filter,
+            limit=1000,  # Reasonable limit for context window
+            with_vectors=True,
+            with_payload=True,
+        )
+
+        # Convert to chunks
+        chunks = []
+        for point in points:
+            chunk = self._payload_to_chunk(point.payload, embedding=point.vector)
+            
+            # Additional filtering for page_number (since Qdrant doesn't support list range queries)
+            if position_field == "page_number":
+                if chunk.metadata.page_numbers:
+                    if not any(position_start <= page <= position_end for page in chunk.metadata.page_numbers):
+                        continue
+                else:
+                    continue
+            
+            chunks.append(chunk)
+
+        # Sort by position
+        if position_field == "chunk_index":
+            chunks.sort(key=lambda c: c.metadata.chunk_index)
+        elif position_field == "page_number":
+            chunks.sort(key=lambda c: c.metadata.page_numbers[0] if c.metadata.page_numbers else 0)
+
+        logger.debug(
+            f"Retrieved {len(chunks)} chunks by {position_field} "
+            f"range [{position_start}, {position_end}] for document {document_id}"
+        )
+
+        return chunks

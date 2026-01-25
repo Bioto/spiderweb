@@ -12,12 +12,13 @@ if TYPE_CHECKING:
 
     from spiderweb.extractors.base import Extractor
 
-from spiderweb.models.config import ChunkerConfig, ValidatorConfig, VectorStoreConfig
+from spiderweb.models.config import ChunkerConfig, ValidatorConfig, VectorStoreConfig, ContextWindowConfig
 from spiderweb.models.document import Document
-from spiderweb.models.result import BatchIngestionResult, IngestionResult, QueryResult
+from spiderweb.models.result import BatchIngestionResult, IngestionResult, QueryResult, QueryResultWithContext
 from spiderweb.observability.logging_config import get_logger
 from spiderweb.pipeline.batch import BatchProcessor
 from spiderweb.pipeline.processor import DocumentProcessor
+from spiderweb.pipeline.context import ContextRetriever
 
 logger = get_logger(__name__)
 
@@ -176,16 +177,18 @@ class Spiderweb:
         query: str,
         top_k: int = 10,
         filter_dict: dict | None = None,
-    ) -> QueryResult:
+        context_window: ContextWindowConfig | None = None,
+    ) -> QueryResult | QueryResultWithContext:
         """Query the vector store.
 
         Args:
             query: Query string
             top_k: Number of results to return
             filter_dict: Optional metadata filters
+            context_window: Optional context window configuration for surrounding chunks
 
         Returns:
-            Query result with matched chunks
+            Query result with matched chunks, optionally with context
 
         Raises:
             ValueError: If no LLM client provided
@@ -213,6 +216,7 @@ class Spiderweb:
         # Format results
         chunks = []
         scores = []
+        matched_chunks = []
 
         for chunk, score in results:
             chunks.append(
@@ -225,6 +229,38 @@ class Spiderweb:
                 }
             )
             scores.append(score)
+            matched_chunks.append(chunk)
+
+        # Retrieve context if requested
+        if context_window:
+            retriever = ContextRetriever(vector_store=self.document_processor.vector_store)
+            
+            context_by_match = await retriever.get_context_for_matches(
+                matches=matched_chunks,
+                config=context_window,
+                llm_client=self.llm_client,
+            )
+
+            # Collect all unique context chunks
+            all_context_chunks = []
+            seen_ids = set()
+            
+            for match_context in context_by_match.values():
+                for ctx_chunk in match_context.chunks:
+                    chunk_id = ctx_chunk.chunk["id"]
+                    if chunk_id not in seen_ids:
+                        seen_ids.add(chunk_id)
+                        all_context_chunks.append(ctx_chunk.chunk)
+
+            return QueryResultWithContext(
+                query=query,
+                chunks=chunks,
+                scores=scores,
+                execution_time_seconds=execution_time,
+                total_results=len(chunks),
+                context_by_match=context_by_match,
+                all_context_chunks=all_context_chunks,
+            )
 
         return QueryResult(
             query=query,
@@ -331,7 +367,8 @@ async def query(
     llm_client: "GlueLLM | None" = None,
     vector_store_url: str | None = None,
     top_k: int = 10,
-) -> QueryResult:
+    context_window: ContextWindowConfig | None = None,
+) -> QueryResult | QueryResultWithContext:
     """Quick vector store query.
 
     Args:
@@ -339,9 +376,10 @@ async def query(
         llm_client: GlueLLM client for embeddings
         vector_store_url: Vector store connection URL
         top_k: Number of results
+        context_window: Optional context window configuration
 
     Returns:
-        Query result
+        Query result, optionally with context
 
     Example:
         >>> from gluellm import GlueLLM
@@ -360,4 +398,4 @@ async def query(
         vector_store_url=vector_store_url,
     )
 
-    return await web.query(query_text, top_k=top_k)
+    return await web.query(query_text, top_k=top_k, context_window=context_window)

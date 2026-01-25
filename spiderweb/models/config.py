@@ -293,3 +293,82 @@ class VectorStoreConfig(BaseModel):
                 "distance_metric": "cosine",
             }
         }
+
+
+class ContextWindowConfig(BaseModel):
+    """Configuration for retrieving surrounding context for query results.
+    
+    Enables retrieval of chunks/pages before and after each matched chunk,
+    with optional semantic guidance and adaptive expansion.
+    """
+
+    enabled: bool = Field(
+        default=True,
+        description="Whether to include surrounding context chunks",
+    )
+    chunks_before: int = Field(
+        default=2,
+        ge=0,
+        description="Number of chunks/pages before each match to include",
+    )
+    chunks_after: int = Field(
+        default=2,
+        ge=0,
+        description="Number of chunks/pages after each match to include",
+    )
+    context_mode: Literal["page", "chunk"] = Field(
+        default="page",
+        description="Whether to retrieve by chunk_index or page_number (page-first default)",
+    )
+    semantic_guide: str | None = Field(
+        default=None,
+        description="Optional prompt describing what kind of context to look for",
+    )
+    semantic_boost_weight: float = Field(
+        default=0.3,
+        ge=0.0,
+        le=1.0,
+        description="Weight for semantic scoring when guide is provided",
+    )
+    deduplicate: bool = Field(
+        default=True,
+        description="Remove duplicate context chunks when multiple matches are close together",
+    )
+    include_match_in_context: bool = Field(
+        default=True,
+        description="Include the matched chunk itself in the context results",
+    )
+    # Adaptive expansion when semantic guide doesn't find good matches
+    expand_on_low_score: bool = Field(
+        default=True,
+        description="Adaptively expand window when semantic scores are below threshold",
+    )
+    semantic_min_score: float = Field(
+        default=0.5,
+        ge=0.0,
+        le=1.0,
+        description="Minimum semantic similarity score to consider context relevant",
+    )
+    max_expansion_steps: int = Field(
+        default=3,
+        ge=0,
+        description="Maximum number of expansion attempts when scores are low",
+    )
+    expansion_step_size: int = Field(
+        default=2,
+        ge=1,
+        description="Number of pages/chunks to add per expansion step",
+    )
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "enabled": True,
+                "chunks_before": 3,
+                "chunks_after": 3,
+                "context_mode": "page",
+                "semantic_guide": "Focus on financial data and metrics",
+                "expand_on_low_score": True,
+                "semantic_min_score": 0.6,
+            }
+        }

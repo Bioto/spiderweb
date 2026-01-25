@@ -24,8 +24,10 @@ from spiderweb.models.progressive import (
     ProgressiveRAGConfig,
     SummaryStrategy,
 )
+from spiderweb.models.config import ContextWindowConfig
 from spiderweb.observability.logging_config import get_logger
 from spiderweb.pipeline.processor import DocumentProcessor
+from spiderweb.pipeline.context import ContextRetriever
 from spiderweb.stores.base import VectorStore
 
 logger = get_logger(__name__)
@@ -306,15 +308,23 @@ class ProgressiveRAGProcessor:
 
         return chunks
 
-    async def query(self, query_text: str, top_k: int = 5, source_file: Path | None = None) -> ProgressiveQueryResult:
+    async def query(
+        self,
+        query_text: str,
+        top_k: int = 5,
+        source_file: Path | None = None,
+        context_window: ContextWindowConfig | None = None,
+    ) -> ProgressiveQueryResult:
         """Query with progressive processing.
 
         First queries summaries, then optionally triggers full processing.
+        Can retrieve surrounding page context for matched pages.
 
         Args:
             query_text: Query string
             top_k: Number of results to return
             source_file: Original document path (needed for full processing)
+            context_window: Optional context window config (defaults to page mode)
 
         Returns:
             Progressive query result with summaries and/or full chunks
@@ -344,7 +354,44 @@ class ProgressiveRAGProcessor:
             )
             page_summaries.append(page_summary)
 
-        # 3. Check if we should trigger full processing
+        # 3. Retrieve page-level context if requested
+        if context_window:
+            # Default to page mode for progressive RAG
+            if context_window.context_mode != "page":
+                logger.info("Overriding context mode to 'page' for progressive RAG")
+                context_window.context_mode = "page"
+
+            # Convert page summaries to chunks for context retrieval
+            from spiderweb.models.document import Chunk, ChunkMetadata, ChunkType
+
+            summary_chunks = []
+            for ps in page_summaries:
+                chunk = Chunk(
+                    id=ps.page_id,
+                    content=ps.summary_text,
+                    embedding=ps.embedding,
+                    metadata=ChunkMetadata(
+                        document_id=ps.document_id,
+                        chunk_index=ps.page_number,
+                        chunk_type=ChunkType.HIERARCHICAL,
+                        page_numbers=[ps.page_number],
+                        extra=ps.metadata,
+                    ),
+                )
+                summary_chunks.append(chunk)
+
+            # Retrieve surrounding page summaries
+            retriever = ContextRetriever(vector_store=self.summary_store)
+            context_by_match = await retriever.get_context_for_matches(
+                matches=summary_chunks,
+                config=context_window,
+                llm_client=self.llm_client,
+            )
+
+            # Add adjacent page summaries to results
+            logger.info(f"Retrieved context for {len(context_by_match)} matched pages")
+
+        # 4. Check if we should trigger full processing
         newly_processed = []
         full_results = []
 

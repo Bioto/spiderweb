@@ -98,3 +98,4 @@ class ProgressiveQueryResult(BaseModel):
     processing_time_ms: float = Field(..., description="Total query time in milliseconds")
     cache_hit: bool = Field(False, description="Whether results came from full cache")
 
+
