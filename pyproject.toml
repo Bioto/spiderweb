@@ -92,10 +92,10 @@ all = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/yourusername/spiderweb"
-Documentation = "https://github.com/yourusername/spiderweb#readme"
-Repository = "https://github.com/yourusername/spiderweb"
-Issues = "https://github.com/yourusername/spiderweb/issues"
+Homepage = "https://github.com/Bioto/spiderweb"
+Documentation = "https://github.com/Bioto/spiderweb#readme"
+Repository = "https://github.com/Bioto/spiderweb"
+Issues = "https://github.com/Bioto/spiderweb/issues"
 
 [tool.setuptools.packages.find]
 where = ["."]
