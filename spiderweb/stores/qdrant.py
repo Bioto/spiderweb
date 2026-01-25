@@ -1,0 +1,359 @@
+"""Qdrant vector store implementation.
+
+Provides persistent vector storage using Qdrant.
+"""
+
+from typing import Any
+
+from qdrant_client import AsyncQdrantClient
+from qdrant_client.http import models as qmodels
+
+from spiderweb.models.config import VectorStoreConfig
+from spiderweb.models.document import Chunk, ChunkMetadata, ChunkType
+from spiderweb.observability.logging_config import get_logger
+
+logger = get_logger(__name__)
+
+
+class QdrantVectorStore:
+    """Qdrant-based vector store.
+
+    Provides persistent storage and efficient similarity search using Qdrant.
+
+    Example:
+        >>> store = QdrantVectorStore(
+        ...     host="localhost",
+        ...     port=6333,
+        ...     collection_name="my_docs",
+        ...     embedding_dimension=1536,
+        ... )
+        >>> await store.initialize()
+        >>> await store.upsert(chunks)
+        >>> results = await store.query(query_embedding, top_k=5)
+    """
+
+    def __init__(
+        self,
+        host: str = "localhost",
+        port: int = 6333,
+        collection_name: str = "spiderweb_documents",
+        embedding_dimension: int = 1536,
+        distance_metric: str = "cosine",
+        api_key: str | None = None,
+        use_https: bool = False,
+    ):
+        """Initialize Qdrant vector store.
+
+        Args:
+            host: Qdrant server host
+            port: Qdrant server port
+            collection_name: Name of the collection to use
+            embedding_dimension: Dimension of embedding vectors
+            distance_metric: Distance metric ('cosine', 'euclidean', 'dot')
+            api_key: API key for cloud deployments
+            use_https: Use HTTPS for connection
+        """
+        self.collection_name = collection_name
+        self.embedding_dimension = embedding_dimension
+        self.distance_metric = distance_metric
+
+        # Create client
+        self.client = AsyncQdrantClient(
+            host=host,
+            port=port,
+            api_key=api_key,
+            https=use_https,
+        )
+
+        self._initialized = False
+
+        logger.debug(
+            f"Initialized QdrantVectorStore: collection={collection_name}, "
+            f"host={host}:{port}, dimension={embedding_dimension}"
+        )
+
+    @classmethod
+    def from_config(cls, config: VectorStoreConfig) -> "QdrantVectorStore":
+        """Create store from configuration.
+
+        Args:
+            config: Vector store configuration
+
+        Returns:
+            Configured store instance
+        """
+        return cls(
+            host=config.host,
+            port=config.port,
+            collection_name=config.collection_name,
+            embedding_dimension=config.embedding_dimension,
+            distance_metric=config.distance_metric,
+            api_key=config.api_key,
+            use_https=config.use_https,
+        )
+
+    def _get_distance_metric(self) -> qmodels.Distance:
+        """Get Qdrant distance metric enum.
+
+        Returns:
+            Qdrant distance metric
+        """
+        metric_map = {
+            "cosine": qmodels.Distance.COSINE,
+            "euclidean": qmodels.Distance.EUCLID,
+            "dot": qmodels.Distance.DOT,
+        }
+        return metric_map.get(self.distance_metric.lower(), qmodels.Distance.COSINE)
+
+    async def initialize(self) -> None:
+        """Initialize the collection.
+
+        Creates the collection if it doesn't exist.
+        """
+        if self._initialized:
+            return
+
+        # Check if collection exists
+        collections = await self.client.get_collections()
+        collection_names = [c.name for c in collections.collections]
+
+        if self.collection_name not in collection_names:
+            # Create collection
+            logger.info(f"Creating Qdrant collection: {self.collection_name}")
+
+            await self.client.create_collection(
+                collection_name=self.collection_name,
+                vectors_config=qmodels.VectorParams(
+                    size=self.embedding_dimension,
+                    distance=self._get_distance_metric(),
+                ),
+            )
+
+            logger.info(f"Created collection {self.collection_name}")
+        else:
+            logger.debug(f"Collection {self.collection_name} already exists")
+
+        self._initialized = True
+
+    def _chunk_to_payload(self, chunk: Chunk) -> dict[str, Any]:
+        """Convert chunk to Qdrant payload.
+
+        Args:
+            chunk: Chunk to convert
+
+        Returns:
+            Payload dictionary
+        """
+        # Serialize chunk metadata
+        payload = {
+            "chunk_id": chunk.id,
+            "content": chunk.content,
+            "document_id": chunk.metadata.document_id,
+            "chunk_index": chunk.metadata.chunk_index,
+            "chunk_type": chunk.metadata.chunk_type.value,
+            "validation_scores": chunk.validation_scores,
+            "parent_id": chunk.parent_id,
+            "children_ids": chunk.children_ids,
+        }
+
+        # Add optional metadata fields
+        if chunk.metadata.start_char is not None:
+            payload["start_char"] = chunk.metadata.start_char
+        if chunk.metadata.end_char is not None:
+            payload["end_char"] = chunk.metadata.end_char
+        if chunk.metadata.page_numbers:
+            payload["page_numbers"] = chunk.metadata.page_numbers
+        if chunk.metadata.section_title:
+            payload["section_title"] = chunk.metadata.section_title
+        if chunk.metadata.section_level is not None:
+            payload["section_level"] = chunk.metadata.section_level
+
+        return payload
+
+    def _payload_to_chunk(self, payload: dict[str, Any], embedding: list[float] | None = None) -> Chunk:
+        """Convert Qdrant payload to chunk.
+
+        Args:
+            payload: Qdrant payload dictionary
+            embedding: Optional embedding vector
+
+        Returns:
+            Reconstructed chunk
+        """
+        metadata = ChunkMetadata(
+            document_id=payload["document_id"],
+            chunk_index=payload["chunk_index"],
+            chunk_type=ChunkType(payload["chunk_type"]),
+            start_char=payload.get("start_char"),
+            end_char=payload.get("end_char"),
+            page_numbers=payload.get("page_numbers", []),
+            section_title=payload.get("section_title"),
+            section_level=payload.get("section_level"),
+        )
+
+        return Chunk(
+            id=payload["chunk_id"],
+            content=payload["content"],
+            embedding=embedding,
+            metadata=metadata,
+            validation_scores=payload.get("validation_scores", {}),
+            parent_id=payload.get("parent_id"),
+            children_ids=payload.get("children_ids", []),
+        )
+
+    async def upsert(self, chunks: list[Chunk]) -> None:
+        """Insert or update chunks.
+
+        Args:
+            chunks: Chunks to upsert
+
+        Raises:
+            ValueError: If chunks don't have embeddings
+        """
+        await self.initialize()
+
+        if not chunks:
+            return
+
+        # Validate embeddings
+        for chunk in chunks:
+            if chunk.embedding is None:
+                raise ValueError(f"Chunk {chunk.id} does not have an embedding")
+
+        # Prepare points
+        points = []
+        for chunk in chunks:
+            point = qmodels.PointStruct(
+                id=chunk.id,
+                vector=chunk.embedding,
+                payload=self._chunk_to_payload(chunk),
+            )
+            points.append(point)
+
+        # Upsert in batches
+        batch_size = 100
+        for i in range(0, len(points), batch_size):
+            batch = points[i : i + batch_size]
+            await self.client.upsert(
+                collection_name=self.collection_name,
+                points=batch,
+            )
+
+        logger.info(f"Upserted {len(chunks)} chunks to Qdrant collection {self.collection_name}")
+
+    async def query(
+        self,
+        embedding: list[float],
+        top_k: int = 10,
+        filter_dict: dict | None = None,
+    ) -> list[tuple[Chunk, float]]:
+        """Query for similar chunks.
+
+        Args:
+            embedding: Query embedding
+            top_k: Number of results
+            filter_dict: Metadata filters (Qdrant filter format)
+
+        Returns:
+            List of (chunk, score) tuples
+        """
+        await self.initialize()
+
+        # Build filter if provided
+        query_filter = None
+        if filter_dict:
+            # Convert dict to Qdrant filter
+            # This is a simple implementation - can be extended for complex filters
+            must_conditions = []
+            for key, value in filter_dict.items():
+                must_conditions.append(qmodels.FieldCondition(key=key, match=qmodels.MatchValue(value=value)))
+
+            query_filter = qmodels.Filter(must=must_conditions)
+
+        # Search/query using the new Qdrant API
+        search_result = await self.client.query_points(
+            collection_name=self.collection_name,
+            query=embedding,
+            limit=top_k,
+            query_filter=query_filter,
+        )
+
+        # Convert results
+        results = []
+        for scored_point in search_result.points:
+            chunk = self._payload_to_chunk(scored_point.payload, embedding=scored_point.vector)
+            score = scored_point.score
+            results.append((chunk, score))
+
+        logger.debug(f"Query returned {len(results)} results")
+
+        return results
+
+    async def delete(self, chunk_ids: list[str]) -> None:
+        """Delete chunks.
+
+        Args:
+            chunk_ids: IDs to delete
+        """
+        await self.initialize()
+
+        await self.client.delete(
+            collection_name=self.collection_name,
+            points_selector=qmodels.PointIdsList(points=chunk_ids),
+        )
+
+        logger.debug(f"Deleted {len(chunk_ids)} chunks from Qdrant")
+
+    async def get(self, chunk_ids: list[str]) -> list[Chunk]:
+        """Get chunks by ID.
+
+        Args:
+            chunk_ids: IDs to retrieve
+
+        Returns:
+            List of chunks
+        """
+        await self.initialize()
+
+        points = await self.client.retrieve(
+            collection_name=self.collection_name,
+            ids=chunk_ids,
+            with_vectors=True,
+        )
+
+        chunks = []
+        for point in points:
+            chunk = self._payload_to_chunk(point.payload, embedding=point.vector)
+            chunks.append(chunk)
+
+        logger.debug(f"Retrieved {len(chunks)}/{len(chunk_ids)} chunks from Qdrant")
+
+        return chunks
+
+    async def count(self) -> int:
+        """Get total chunk count.
+
+        Returns:
+            Number of chunks
+        """
+        await self.initialize()
+
+        collection_info = await self.client.get_collection(self.collection_name)
+        return collection_info.points_count
+
+    async def clear(self) -> None:
+        """Clear all chunks."""
+        await self.initialize()
+
+        # Delete and recreate collection
+        await self.client.delete_collection(self.collection_name)
+
+        await self.client.create_collection(
+            collection_name=self.collection_name,
+            vectors_config=qmodels.VectorParams(
+                size=self.embedding_dimension,
+                distance=self._get_distance_metric(),
+            ),
+        )
+
+        logger.info(f"Cleared collection {self.collection_name}")

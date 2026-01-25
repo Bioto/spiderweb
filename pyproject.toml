@@ -1,0 +1,175 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "spiderweb"
+version = "0.1.0"
+description = "Scalable document processing and RAG pipeline with cross-validation, intelligent chunking, and pluggable vector stores"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.12"
+authors = [
+    {name = "Nicholas Young", email = "nick@nyoung.dev"}
+]
+keywords = [
+    "rag",
+    "document-processing",
+    "vector-database",
+    "embeddings",
+    "chunking",
+    "semantic-search",
+    "qdrant",
+    "llm",
+    "ai"
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+dependencies = [
+    # Core LLM and embedding capabilities
+    "gluellm>=1.1.0",
+    # Document processing
+    "markitdown[all]>=0.0.1a2",
+    "aiofiles>=24.1.0",
+    # Vector storage
+    "qdrant-client>=1.12.0",
+    # Core utilities
+    "pydantic>=2.12.5",
+    "pydantic-settings>=2.12.0",
+    "tenacity>=9.0.0",
+    # Logging and CLI
+    "colorlog>=6.8.0",
+    "python-json-logger>=2.0.7",
+    "click>=8.3.1",
+    "rich>=14.2.0",
+    # Text processing
+    "nltk>=3.9.1",
+    "spacy>=3.8.0",
+]
+
+[project.optional-dependencies]
+# PDF processing
+pdf = [
+    "pdfminer.six>=20231228",
+    "pymupdf>=1.24.0",
+]
+
+# Office document processing
+office = [
+    "python-docx>=1.1.0",
+    "openpyxl>=3.1.0",
+    "python-pptx>=1.0.0",
+]
+
+# OCR capabilities
+ocr = [
+    "pytesseract>=0.3.10",
+    "pillow>=10.0.0",
+]
+
+# Development dependencies
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "pytest-cov>=4.1.0",
+    "ruff>=0.14.10",
+    "pre-commit>=4.5.1",
+]
+
+# All optional features
+all = [
+    "spiderweb[pdf,office,ocr]",
+]
+
+[project.urls]
+Homepage = "https://github.com/yourusername/spiderweb"
+Documentation = "https://github.com/yourusername/spiderweb#readme"
+Repository = "https://github.com/yourusername/spiderweb"
+Issues = "https://github.com/yourusername/spiderweb/issues"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["spiderweb*"]
+namespaces = false
+
+[project.scripts]
+spiderweb = "spiderweb.cli:cli"
+
+[tool.ruff]
+target-version = "py312"
+include = ["spiderweb/**/*.py", "tests/**/*.py", "examples/**/*.py"]
+exclude = [
+    ".git",
+    ".venv",
+    "venv",
+    "__pycache__",
+    "*.egg-info",
+    ".pytest_cache",
+    ".ruff_cache",
+    "gluellm",  # Exclude the gluellm directory
+]
+line-length = 120
+
+[tool.ruff.lint]
+select = [
+    "E",     # pycodestyle errors
+    "W",     # pycodestyle warnings
+    "F",     # pyflakes
+    "I",     # isort
+    "N",     # pep8-naming
+    "UP",    # pyupgrade
+    "B",     # flake8-bugbear
+    "C4",    # flake8-comprehensions
+    "SIM",   # flake8-simplify
+    "TCH",   # flake8-type-checking
+    "TID",   # flake8-tidy-imports
+    "Q",     # flake8-quotes
+    "RET",   # flake8-return
+    "PTH",   # flake8-use-pathlib
+]
+
+ignore = [
+    "E501",   # Line too long (handled by formatter)
+    "B008",   # Do not perform function call in argument defaults
+    "UP007",  # Use X | Y for type annotations
+]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F401"]
+"spiderweb/cli/**/*.py" = ["T201"]
+"examples/**/*.py" = ["T201"]
+"tests/**/*.py" = ["T201", "F841", "E402", "SIM108"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["spiderweb"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "auto"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+asyncio_mode = "auto"
+addopts = [
+    "-v",
+    "--tb=short",
+    "--strict-markers",
+]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "integration: marks tests as integration tests",
+]

@@ -1,0 +1,238 @@
+"""Configuration management for Spiderweb.
+
+This module provides configuration management using pydantic-settings,
+following the same patterns as gluellm for consistency.
+"""
+
+import logging
+from functools import lru_cache
+from pathlib import Path
+from typing import Literal
+
+from pydantic import Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class SpiderwebSettings(BaseSettings):
+    """Global settings for Spiderweb.
+
+    Settings can be configured via:
+    1. Environment variables (prefixed with SPIDERWEB_)
+    2. .env file
+    3. Direct instantiation
+
+    Example:
+        >>> from spiderweb.config import settings
+        >>> print(settings.default_chunker)
+        'sliding_window'
+    """
+
+    model_config = SettingsConfigDict(
+        env_prefix="SPIDERWEB_",
+        env_file=".env",
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="ignore",
+    )
+
+    # Chunking settings
+    default_chunker: Literal["hierarchical", "semantic", "sentence", "recursive"] = Field(
+        default="hierarchical",
+        description="Default chunking strategy to use",
+    )
+    default_chunk_size: int = Field(
+        default=1000,
+        ge=100,
+        le=10000,
+        description="Default maximum chunk size in characters",
+    )
+    default_chunk_overlap: int = Field(
+        default=200,
+        ge=0,
+        le=1000,
+        description="Default overlap between chunks",
+    )
+
+    # Embedding settings (delegated to gluellm)
+    embedding_model: str = Field(
+        default="openai/text-embedding-3-small",
+        description="Default embedding model for semantic operations",
+    )
+    embedding_dimension: int = Field(
+        default=1536,
+        description="Embedding vector dimension",
+    )
+
+    # Vector store settings
+    default_vector_store: Literal["memory", "qdrant"] = Field(
+        default="memory",
+        description="Default vector store to use",
+    )
+    qdrant_host: str = Field(
+        default="localhost",
+        description="Qdrant server host",
+    )
+    qdrant_port: int = Field(
+        default=6333,
+        description="Qdrant server port",
+    )
+    qdrant_api_key: str | None = Field(
+        default=None,
+        description="Qdrant API key (for cloud deployments)",
+    )
+    default_collection_name: str = Field(
+        default="spiderweb_documents",
+        description="Default Qdrant collection name",
+    )
+
+    # Validation settings
+    enable_validation: bool = Field(
+        default=True,
+        description="Enable chunk validation by default",
+    )
+    min_chunk_quality_score: float = Field(
+        default=0.3,
+        ge=0.0,
+        le=1.0,
+        description="Minimum quality score for chunks (0-1)",
+    )
+    deduplication_threshold: float = Field(
+        default=0.95,
+        ge=0.0,
+        le=1.0,
+        description="Similarity threshold for deduplication (0-1)",
+    )
+    enable_llm_validation: bool = Field(
+        default=False,
+        description="Enable LLM-based coherence validation (costs API calls)",
+    )
+
+    # Batch processing settings
+    max_concurrent_extractions: int = Field(
+        default=5,
+        ge=1,
+        le=100,
+        description="Maximum concurrent file extractions",
+    )
+    max_concurrent_embeddings: int = Field(
+        default=10,
+        ge=1,
+        le=100,
+        description="Maximum concurrent embedding requests",
+    )
+    max_tokens_per_embedding_batch: int = Field(
+        default=200000,
+        ge=1000,
+        le=300000,
+        description="Maximum tokens per embedding API call (OpenAI limit is 300k)",
+    )
+    embedding_batch_size: int = Field(
+        default=100,
+        ge=1,
+        le=2048,
+        description="Maximum number of texts per embedding batch",
+    )
+    batch_size: int = Field(
+        default=100,
+        ge=1,
+        le=1000,
+        description="Batch size for vector store operations",
+    )
+
+    # Extraction settings
+    default_extraction_method: Literal["markitdown", "auto"] = Field(
+        default="markitdown",
+        description="Default extraction method",
+    )
+    enable_cross_extraction: bool = Field(
+        default=False,
+        description="Extract with multiple methods for comparison",
+    )
+
+    # Logging settings
+    log_level: str = Field(
+        default="INFO",
+        description="Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)",
+    )
+    log_file_level: str = Field(
+        default="DEBUG",
+        description="File logging level",
+    )
+    log_dir: Path = Field(
+        default=Path("logs"),
+        description="Directory for log files",
+    )
+    log_file_name: str = Field(
+        default="spiderweb.log",
+        description="Log file name",
+    )
+    log_json_format: bool = Field(
+        default=False,
+        description="Use JSON format for logs",
+    )
+    log_max_bytes: int = Field(
+        default=10485760,  # 10MB
+        description="Maximum log file size in bytes",
+    )
+    log_backup_count: int = Field(
+        default=5,
+        description="Number of log backup files to keep",
+    )
+    log_console_output: bool = Field(
+        default=True,
+        description="Enable console logging output",
+    )
+
+    # Storage settings
+    cache_dir: Path = Field(
+        default=Path(".spiderweb_cache"),
+        description="Directory for caching extracted documents",
+    )
+    enable_cache: bool = Field(
+        default=True,
+        description="Enable document extraction caching",
+    )
+
+    def get_log_level(self) -> int:
+        """Convert log level string to logging constant.
+
+        Returns:
+            logging level constant (e.g., logging.INFO)
+        """
+        return getattr(logging, self.log_level.upper(), logging.INFO)
+
+    def get_file_log_level(self) -> int:
+        """Convert file log level string to logging constant.
+
+        Returns:
+            logging level constant for file logging
+        """
+        return getattr(logging, self.log_file_level.upper(), logging.DEBUG)
+
+
+@lru_cache
+def get_settings() -> SpiderwebSettings:
+    """Get cached settings instance.
+
+    This function uses lru_cache to ensure only one settings instance exists.
+
+    Returns:
+        The global settings instance
+    """
+    return SpiderwebSettings()
+
+
+# Global settings instance
+settings = get_settings()
+
+
+def reload_settings() -> SpiderwebSettings:
+    """Reload settings from environment/file.
+
+    Useful for testing or when configuration changes at runtime.
+
+    Returns:
+        Fresh settings instance
+    """
+    get_settings.cache_clear()
+    return get_settings()
