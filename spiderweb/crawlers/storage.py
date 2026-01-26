@@ -5,6 +5,7 @@ in various formats (JSON, markdown, HTML, etc.).
 """
 
 import json
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -47,8 +48,6 @@ class CrawlStorage:
         Returns:
             Safe filename string
         """
-        import re
-        
         # Remove protocol
         filename = url.replace("https://", "").replace("http://", "")
         

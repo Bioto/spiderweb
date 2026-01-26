@@ -7,6 +7,7 @@ from typing import Literal
 
 from spiderweb.models.document import Chunk
 from spiderweb.observability.logging_config import get_logger
+from spiderweb.utils.vector_math import cosine_similarity
 
 logger = get_logger(__name__)
 
@@ -26,27 +27,6 @@ class MemoryVectorStore:
         """Initialize in-memory store."""
         self._chunks: dict[str, Chunk] = {}
         logger.debug("Initialized MemoryVectorStore")
-
-    def _cosine_similarity(self, vec1: list[float], vec2: list[float]) -> float:
-        """Calculate cosine similarity.
-
-        Args:
-            vec1: First vector
-            vec2: Second vector
-
-        Returns:
-            Cosine similarity (-1 to 1)
-        """
-        import math
-
-        dot_product = sum(a * b for a, b in zip(vec1, vec2, strict=True))
-        magnitude1 = math.sqrt(sum(a * a for a in vec1))
-        magnitude2 = math.sqrt(sum(b * b for b in vec2))
-
-        if magnitude1 == 0 or magnitude2 == 0:
-            return 0.0
-
-        return dot_product / (magnitude1 * magnitude2)
 
     async def upsert(self, chunks: list[Chunk]) -> None:
         """Insert or update chunks.
@@ -88,7 +68,7 @@ class MemoryVectorStore:
         similarities = []
         for chunk in self._chunks.values():
             if chunk.embedding:
-                similarity = self._cosine_similarity(embedding, chunk.embedding)
+                similarity = cosine_similarity(embedding, chunk.embedding)
                 similarities.append((chunk, similarity))
 
         # Sort by similarity (descending) and take top_k

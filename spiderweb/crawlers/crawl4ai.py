@@ -9,6 +9,7 @@ import re
 from typing import Any
 
 from spiderweb.crawlers.base import Crawler, CrawlResult
+from spiderweb.crawlers.url_validation import validate_http_url
 from spiderweb.models.config import CrawlerConfig
 from spiderweb.observability.logging_config import get_logger
 
@@ -131,6 +132,9 @@ class Crawl4AICrawler:
         """
         if config is None:
             config = CrawlerConfig(provider="crawl4ai")
+
+        # Basic safety/validity check (scheme/host and obvious local targets).
+        url = validate_http_url(url)
         
         crawler = await self._get_crawler()
         

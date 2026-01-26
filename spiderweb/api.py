@@ -5,7 +5,7 @@ following the same patterns as gluellm for a consistent user experience.
 """
 
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal, overload
 
 if TYPE_CHECKING:
     from gluellm import GlueLLM
@@ -330,6 +330,155 @@ class Spiderweb:
             expansion_strategy=expansion_strategy,
             rrf_scores=rrf_scores_list,
         )
+
+    async def crawl_one(
+        self,
+        url: str,
+        crawler_config: CrawlerConfig | None = None,
+        extraction_config: CrawlExtractionConfig | None = None,
+        output_schema: type | None = None,
+        save_to: str | Path | None = None,
+        save_format: str = "all",
+    ) -> CrawlResult:
+        """Crawl a single URL and return a single `CrawlResult`.
+
+        Prefer this over `crawl()` when you want a stable return type.
+
+        Raises:
+            ValueError: If crawling returns multiple pages (e.g. max_depth > 1).
+        """
+        result = await self.crawl(
+            url=url,
+            crawler_config=crawler_config,
+            extraction_config=extraction_config,
+            output_schema=output_schema,
+            ingest=False,
+            save_to=save_to,
+            save_format=save_format,
+        )
+        if isinstance(result, list):
+            raise ValueError("crawl_one() got multiple results. Use crawl_many() or set crawler_config.max_depth=1.")
+        if not isinstance(result, CrawlResult):
+            raise TypeError(f"crawl_one() expected CrawlResult, got {type(result).__name__}")
+        return result
+
+    async def crawl_many(
+        self,
+        urls: list[str],
+        crawler_config: CrawlerConfig | None = None,
+        extraction_config: CrawlExtractionConfig | None = None,
+        output_schema: type | None = None,
+        save_to: str | Path | None = None,
+        save_format: str = "all",
+    ) -> list[CrawlResult]:
+        """Crawl multiple URLs and return a list of `CrawlResult`."""
+        result = await self.crawl(
+            url=urls,
+            crawler_config=crawler_config,
+            extraction_config=extraction_config,
+            output_schema=output_schema,
+            ingest=False,
+            save_to=save_to,
+            save_format=save_format,
+        )
+        if not isinstance(result, list):
+            raise TypeError(f"crawl_many() expected list[CrawlResult], got {type(result).__name__}")
+        return result
+
+    async def crawl_and_ingest_one(
+        self,
+        url: str,
+        crawler_config: CrawlerConfig | None = None,
+        extraction_config: CrawlExtractionConfig | None = None,
+        output_schema: type | None = None,
+    ) -> IngestionResult:
+        """Crawl a single URL and ingest it, returning an `IngestionResult`.
+
+        Raises:
+            ValueError: If crawling returns multiple pages (e.g. max_depth > 1).
+        """
+        result = await self.crawl(
+            url=url,
+            crawler_config=crawler_config,
+            extraction_config=extraction_config,
+            output_schema=output_schema,
+            ingest=True,
+        )
+        if isinstance(result, BatchIngestionResult):
+            raise ValueError(
+                "crawl_and_ingest_one() got a batch result. Use crawl_and_ingest_many() "
+                "or set crawler_config.max_depth=1."
+            )
+        if not isinstance(result, IngestionResult):
+            raise TypeError(f"crawl_and_ingest_one() expected IngestionResult, got {type(result).__name__}")
+        return result
+
+    async def crawl_and_ingest_many(
+        self,
+        urls: list[str],
+        crawler_config: CrawlerConfig | None = None,
+        extraction_config: CrawlExtractionConfig | None = None,
+        output_schema: type | None = None,
+    ) -> BatchIngestionResult:
+        """Crawl multiple URLs and ingest them, returning a `BatchIngestionResult`."""
+        result = await self.crawl(
+            url=urls,
+            crawler_config=crawler_config,
+            extraction_config=extraction_config,
+            output_schema=output_schema,
+            ingest=True,
+        )
+        if not isinstance(result, BatchIngestionResult):
+            raise TypeError(f"crawl_and_ingest_many() expected BatchIngestionResult, got {type(result).__name__}")
+        return result
+
+    @overload
+    async def crawl(
+        self,
+        url: str,
+        crawler_config: CrawlerConfig | None = None,
+        extraction_config: CrawlExtractionConfig | None = None,
+        output_schema: type | None = None,
+        ingest: Literal[False] = False,
+        save_to: str | Path | None = None,
+        save_format: str = "all",
+    ) -> CrawlResult: ...
+
+    @overload
+    async def crawl(
+        self,
+        url: list[str],
+        crawler_config: CrawlerConfig | None = None,
+        extraction_config: CrawlExtractionConfig | None = None,
+        output_schema: type | None = None,
+        ingest: Literal[False] = False,
+        save_to: str | Path | None = None,
+        save_format: str = "all",
+    ) -> list[CrawlResult]: ...
+
+    @overload
+    async def crawl(
+        self,
+        url: str,
+        crawler_config: CrawlerConfig | None = None,
+        extraction_config: CrawlExtractionConfig | None = None,
+        output_schema: type | None = None,
+        ingest: Literal[True] = True,
+        save_to: str | Path | None = None,
+        save_format: str = "all",
+    ) -> IngestionResult: ...
+
+    @overload
+    async def crawl(
+        self,
+        url: list[str],
+        crawler_config: CrawlerConfig | None = None,
+        extraction_config: CrawlExtractionConfig | None = None,
+        output_schema: type | None = None,
+        ingest: Literal[True] = True,
+        save_to: str | Path | None = None,
+        save_format: str = "all",
+    ) -> BatchIngestionResult: ...
 
     async def crawl(
         self,

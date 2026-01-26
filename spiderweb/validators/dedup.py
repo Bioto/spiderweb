@@ -12,6 +12,7 @@ from spiderweb.models.config import ValidatorConfig
 from spiderweb.models.document import Chunk
 from spiderweb.models.result import ValidationResult
 from spiderweb.observability.logging_config import get_logger
+from spiderweb.utils.vector_math import cosine_similarity
 
 logger = get_logger(__name__)
 
@@ -80,27 +81,6 @@ class DedupValidator:
             use_embedding_similarity=config.enable_deduplication,
         )
 
-    def _cosine_similarity(self, vec1: list[float], vec2: list[float]) -> float:
-        """Calculate cosine similarity.
-
-        Args:
-            vec1: First vector
-            vec2: Second vector
-
-        Returns:
-            Cosine similarity (0-1)
-        """
-        import math
-
-        dot_product = sum(a * b for a, b in zip(vec1, vec2, strict=True))
-        magnitude1 = math.sqrt(sum(a * a for a in vec1))
-        magnitude2 = math.sqrt(sum(b * b for b in vec2))
-
-        if magnitude1 == 0 or magnitude2 == 0:
-            return 0.0
-
-        return dot_product / (magnitude1 * magnitude2)
-
     def add_seen(self, chunk: Chunk) -> None:
         """Add a chunk to the seen set.
 
@@ -153,7 +133,7 @@ class DedupValidator:
             if chunk.embedding:
                 # Compare with seen chunks
                 for seen_id, seen_embedding in self._seen_chunks:
-                    similarity = self._cosine_similarity(chunk.embedding, seen_embedding)
+                    similarity = cosine_similarity(chunk.embedding, seen_embedding)
 
                     if similarity >= self.threshold:
                         is_duplicate = True

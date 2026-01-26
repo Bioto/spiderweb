@@ -12,6 +12,7 @@ from spiderweb.chunkers.base import split_into_sentences
 from spiderweb.models.config import ChunkerConfig
 from spiderweb.models.document import Chunk, ChunkMetadata, ChunkType, Document
 from spiderweb.observability.logging_config import get_logger
+from spiderweb.utils.vector_math import cosine_similarity
 
 logger = get_logger(__name__)
 
@@ -73,27 +74,6 @@ class SemanticChunker:
             min_chunk_size=config.min_chunk_size,
         )
 
-    def _cosine_similarity(self, vec1: list[float], vec2: list[float]) -> float:
-        """Calculate cosine similarity between two vectors.
-
-        Args:
-            vec1: First vector
-            vec2: Second vector
-
-        Returns:
-            Cosine similarity (0-1)
-        """
-        import math
-
-        dot_product = sum(a * b for a, b in zip(vec1, vec2, strict=True))
-        magnitude1 = math.sqrt(sum(a * a for a in vec1))
-        magnitude2 = math.sqrt(sum(b * b for b in vec2))
-
-        if magnitude1 == 0 or magnitude2 == 0:
-            return 0.0
-
-        return dot_product / (magnitude1 * magnitude2)
-
     async def chunk_async(self, document: Document) -> list[Chunk]:
         """Split document into semantic chunks (async version).
 
@@ -140,7 +120,7 @@ class SemanticChunker:
 
         for i in range(1, len(sentences)):
             # Calculate similarity with previous sentence
-            similarity = self._cosine_similarity(embeddings[i - 1], embeddings[i])
+            similarity = cosine_similarity(embeddings[i - 1], embeddings[i])
 
             sentence_length = len(sentences[i])
 

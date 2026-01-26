@@ -84,4 +84,6 @@ __all__ = [
     "CrawlExtractionConfig",
 ]
 
-__version__ = "0.1.0"
+from spiderweb._version import get_version
+
+__version__ = get_version()

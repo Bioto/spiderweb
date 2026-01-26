@@ -5,6 +5,7 @@ reformulation and HyDE (Hypothetical Document Embeddings), with results
 combined using Reciprocal Rank Fusion.
 """
 
+import re
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -123,7 +124,6 @@ class QueryExpander:
             
             # Remove common prefixes like "1. ", "- ", "* ", etc.
             # Handle numbered lists (1., 2., etc.)
-            import re
             line = re.sub(r'^\d+[\.\)]\s*', '', line)  # Remove "1. " or "1) "
             
             # Remove bullet points

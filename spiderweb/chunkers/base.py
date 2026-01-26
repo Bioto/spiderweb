@@ -3,6 +3,7 @@
 Defines the interface that all chunkers must implement.
 """
 
+import re
 from typing import Protocol, runtime_checkable
 
 from spiderweb.models.document import Chunk, Document
@@ -40,8 +41,6 @@ def split_into_sentences(text: str) -> list[str]:
     Returns:
         List of sentences
     """
-    import re
-
     # Simple sentence splitting on . ! ? followed by whitespace
     sentences = re.split(r"(?<=[.!?])\s+", text)
     return [s.strip() for s in sentences if s.strip()]

@@ -5,7 +5,6 @@ semantic guidance and adaptive expansion.
 """
 
 import asyncio
-import math
 from collections import defaultdict
 from typing import TYPE_CHECKING
 
@@ -17,6 +16,7 @@ from spiderweb.models.document import Chunk
 from spiderweb.models.result import ContextChunk, MatchContext
 from spiderweb.observability.logging_config import get_logger
 from spiderweb.stores.base import VectorStore
+from spiderweb.utils.vector_math import cosine_similarity
 
 logger = get_logger(__name__)
 
@@ -66,28 +66,6 @@ class ContextRetriever:
         else:
             return chunk.metadata.chunk_index
 
-    def _cosine_similarity(self, vec1: list[float], vec2: list[float]) -> float:
-        """Calculate cosine similarity between two vectors.
-
-        Args:
-            vec1: First vector
-            vec2: Second vector
-
-        Returns:
-            Cosine similarity score (0-1)
-        """
-        if not vec1 or not vec2:
-            return 0.0
-
-        dot_product = sum(a * b for a, b in zip(vec1, vec2, strict=False))
-        magnitude1 = math.sqrt(sum(a * a for a in vec1))
-        magnitude2 = math.sqrt(sum(b * b for b in vec2))
-
-        if magnitude1 == 0 or magnitude2 == 0:
-            return 0.0
-
-        return dot_product / (magnitude1 * magnitude2)
-
     def _score_chunks(
         self,
         chunks: list[Chunk],
@@ -105,7 +83,7 @@ class ContextRetriever:
         scored = []
         for chunk in chunks:
             if chunk.embedding:
-                score = self._cosine_similarity(chunk.embedding, guide_embedding)
+                score = cosine_similarity(chunk.embedding, guide_embedding, require_same_length=False)
                 scored.append((chunk, score))
             else:
                 scored.append((chunk, 0.0))
