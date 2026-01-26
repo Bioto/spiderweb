@@ -409,5 +409,7 @@ config = CrawlerConfig(
 
 - [Main README](../README.md)
 - [Usage Examples](../examples/crawl_usage.py)
-- [API Documentation](./API.md)
+- [Local Storage](./LOCAL_STORAGE.md)
+- [CLI Reference](./CLI.md)
+- [Configuration Reference](./CONFIGURATION.md)
 

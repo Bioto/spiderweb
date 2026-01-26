@@ -17,11 +17,13 @@ if TYPE_CHECKING:
     from spiderweb.validators.pipeline import ValidationPipeline
 
 from spiderweb.extractors.markitdown import MarkitdownExtractor
+from spiderweb.hooks import HookManager, HookPoint, hooks as global_hooks
 from spiderweb.loaders.file_loader import FileLoader
 from spiderweb.models.config import ChunkerConfig, ValidatorConfig, VectorStoreConfig
 from spiderweb.models.document import Chunk, Document, DocumentMetadata
 from spiderweb.models.result import IngestionResult
 from spiderweb.observability.logging_config import get_logger
+from spiderweb.registry import chunker_registry
 from spiderweb.stores.memory import MemoryVectorStore
 from spiderweb.validators.pipeline import ValidationPipeline
 
@@ -55,13 +57,14 @@ class DocumentProcessor:
         store_config: VectorStoreConfig | None = None,
         enable_validation: bool = True,
         enable_embedding: bool = True,
+        hook_manager: HookManager | None = None,
     ):
         """Initialize document processor.
 
         Args:
             llm_client: GlueLLM client for embeddings
             extractor: Document extractor (defaults to MarkitdownExtractor)
-            chunker: Chunking strategy (defaults to SlidingWindowChunker)
+            chunker: Chunking strategy (defaults to HierarchicalChunker)
             validator: Validation pipeline
             vector_store: Vector store (defaults to MemoryVectorStore)
             chunker_config: Chunker configuration
@@ -69,32 +72,40 @@ class DocumentProcessor:
             store_config: Vector store configuration
             enable_validation: Enable chunk validation
             enable_embedding: Enable embedding generation
+            hook_manager: Optional hook manager for pipeline hooks (defaults to global hooks)
         """
         self.llm_client = llm_client
         self.enable_validation = enable_validation
         self.enable_embedding = enable_embedding
+        self.hooks = hook_manager or global_hooks
 
         # Initialize components
         self.extractor = extractor or MarkitdownExtractor()
         self.file_loader = FileLoader(extractor=self.extractor)
 
-        # Initialize chunker
+        # Initialize chunker via registry
         if chunker:
             self.chunker = chunker
         else:
             config = chunker_config or ChunkerConfig()
-            # Import chunkers based on strategy
-            from spiderweb.chunkers.hierarchical import HierarchicalChunker
-            from spiderweb.models.document import ChunkType
+            # Get strategy name from config (handles both enum and string)
+            strategy = config.strategy.value if hasattr(config.strategy, "value") else str(config.strategy)
 
-            if config.strategy == ChunkType.HIERARCHICAL:
-                self.chunker = HierarchicalChunker.from_config(config)
-            elif config.strategy == ChunkType.SENTENCE:
-                from spiderweb.chunkers.sentence import SentenceChunker
-
-                self.chunker = SentenceChunker.from_config(config)
+            # Look up chunker class in registry
+            if strategy in chunker_registry:
+                chunker_cls = chunker_registry.get(strategy)
+                # Use from_config if available, otherwise direct instantiation
+                if hasattr(chunker_cls, "from_config"):
+                    self.chunker = chunker_cls.from_config(config)
+                else:
+                    self.chunker = chunker_cls()
             else:
-                # Fallback to hierarchical
+                # Fallback to hierarchical for unknown strategies
+                logger.warning(
+                    f"Unknown chunker strategy '{strategy}', falling back to hierarchical. "
+                    f"Available: {chunker_registry.list()}"
+                )
+                from spiderweb.chunkers.hierarchical import HierarchicalChunker
                 self.chunker = HierarchicalChunker.from_config(config)
 
         # Initialize validator
@@ -287,6 +298,43 @@ class DocumentProcessor:
 
         return chunks
 
+    def _create_skipped_result(
+        self,
+        path: Path,
+        start_time: float,
+        reason: str,
+    ) -> IngestionResult:
+        """Create an IngestionResult for a skipped document.
+
+        Args:
+            path: Path to the document
+            start_time: Processing start time
+            reason: Reason for skipping
+
+        Returns:
+            IngestionResult with success=True but no chunks
+        """
+        processing_time = time.time() - start_time
+        return IngestionResult(
+            document=Document(
+                raw_content="",
+                markdown_content="",
+                metadata=DocumentMetadata(
+                    source=str(path),
+                    file_type=path.suffix.lstrip(".") or "unknown",
+                    extraction_method="skipped",
+                ),
+            ),
+            success=True,
+            chunks_created=0,
+            chunks_validated=0,
+            chunks_rejected=0,
+            processing_time_seconds=processing_time,
+            embedding_time_seconds=0.0,
+            errors=[],
+            warnings=[reason],
+        )
+
     async def process(self, file_path: str | Path, store_chunks: bool = True) -> IngestionResult:
         """Process a single document through the full pipeline.
 
@@ -310,13 +358,39 @@ class DocumentProcessor:
         warnings = []
 
         try:
+            # Hook: BEFORE_EXTRACT
+            ctx = await self.hooks.run(HookPoint.BEFORE_EXTRACT, str(path), file_path=str(path))
+            if ctx.skip:
+                logger.info(f"Extraction skipped by hook for {path.name}")
+                return self._create_skipped_result(path, start_time, "Skipped by BEFORE_EXTRACT hook")
+            extract_path = Path(ctx.modified_data) if ctx.modified_data else path
+
             # 1. Load and extract
-            logger.debug(f"Step 1/5: Extracting content from {path.name}")
-            document = await self.file_loader.load(path)
+            logger.debug(f"Step 1/5: Extracting content from {extract_path.name}")
+            document = await self.file_loader.load(extract_path)
+
+            # Hook: AFTER_EXTRACT
+            ctx = await self.hooks.run(HookPoint.AFTER_EXTRACT, document, file_path=str(path))
+            if ctx.modified_data is not None:
+                document = ctx.modified_data
+
+            # Hook: BEFORE_CHUNK
+            ctx = await self.hooks.run(HookPoint.BEFORE_CHUNK, document, file_path=str(path))
+            if ctx.skip:
+                logger.info(f"Chunking skipped by hook for {path.name}")
+                return self._create_skipped_result(path, start_time, "Skipped by BEFORE_CHUNK hook")
+            if ctx.modified_data is not None:
+                document = ctx.modified_data
 
             # 2. Chunk
             logger.debug("Step 2/5: Chunking document")
             chunks = self.chunker.chunk(document)
+
+            # Hook: AFTER_CHUNK
+            ctx = await self.hooks.run(HookPoint.AFTER_CHUNK, chunks, document=document, file_path=str(path))
+            if ctx.modified_data is not None:
+                chunks = ctx.modified_data
+
             document.chunks = chunks
 
             chunks_created = len(chunks)

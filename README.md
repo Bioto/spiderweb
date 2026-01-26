@@ -137,6 +137,12 @@ spiderweb query "What is X?" --store qdrant://localhost:6333/docs --top-k 5
 
 - **Crawling**: [docs/CRAWL_FEATURE.md](docs/CRAWL_FEATURE.md)
 - **Local storage**: [docs/LOCAL_STORAGE.md](docs/LOCAL_STORAGE.md)
+- **Query features**: [docs/QUERY.md](docs/QUERY.md) — query expansion, context windows
+- **Chunking strategies**: [docs/CHUNKERS.md](docs/CHUNKERS.md)
+- **Progressive RAG**: [docs/PROGRESSIVE_RAG.md](docs/PROGRESSIVE_RAG.md) — lazy-loading document processing
+- **Extensibility**: [docs/EXTENSIBILITY.md](docs/EXTENSIBILITY.md) — hooks and custom components
+- **Configuration**: [docs/CONFIGURATION.md](docs/CONFIGURATION.md)
+- **CLI reference**: [docs/CLI.md](docs/CLI.md)
 - **Examples**: [examples/](examples/)
 
 ## Contributing

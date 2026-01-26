@@ -11,12 +11,12 @@ if TYPE_CHECKING:
     from pydantic import BaseModel
 
 from spiderweb.crawlers.base import Crawler, CrawlResult
-from spiderweb.crawlers.crawl4ai import Crawl4AICrawler
 from spiderweb.crawlers.extraction import CrawlExtractor
-from spiderweb.crawlers.http import HttpCrawler
+from spiderweb.hooks import HookManager, HookPoint, hooks as global_hooks
 from spiderweb.models.config import CrawlExtractionConfig, CrawlerConfig
 from spiderweb.models.document import Document, DocumentMetadata
 from spiderweb.observability.logging_config import get_logger
+from spiderweb.registry import crawler_registry
 
 logger = get_logger(__name__)
 
@@ -40,6 +40,7 @@ class WebLoader:
         llm_client: "GlueLLM | None" = None,
         crawler_config: CrawlerConfig | None = None,
         extraction_config: CrawlExtractionConfig | None = None,
+        hook_manager: HookManager | None = None,
     ):
         """Initialize web loader.
         
@@ -49,19 +50,29 @@ class WebLoader:
             llm_client: Optional GlueLLM client for extraction
             crawler_config: Optional crawler configuration
             extraction_config: Optional extraction configuration
+            hook_manager: Optional hook manager for pipeline hooks (defaults to global hooks)
         """
         self.crawler_config = crawler_config or CrawlerConfig()
         self.extraction_config = extraction_config or CrawlExtractionConfig(enabled=False)
         self.llm_client = llm_client
+        self.hooks = hook_manager or global_hooks
         
-        # Initialize crawler
+        # Initialize crawler via registry
         if crawler:
             self.crawler = crawler
         else:
-            # Auto-select crawler based on provider
-            if self.crawler_config.provider == "http":
-                self.crawler = HttpCrawler()
-            else:  # crawl4ai
+            provider = self.crawler_config.provider
+            # Look up crawler class in registry
+            if provider in crawler_registry:
+                crawler_cls = crawler_registry.get(provider)
+                self.crawler = crawler_cls()
+            else:
+                # Fallback warning and use crawl4ai
+                logger.warning(
+                    f"Unknown crawler provider '{provider}', falling back to crawl4ai. "
+                    f"Available: {crawler_registry.list()}"
+                )
+                from spiderweb.crawlers.crawl4ai import Crawl4AICrawler
                 self.crawler = Crawl4AICrawler()
         
         # Initialize extractor if enabled and LLM client provided
@@ -149,11 +160,22 @@ class WebLoader:
         
         logger.info(f"Loading URL: {url}")
         
+        # Hook: BEFORE_CRAWL
+        ctx = await self.hooks.run(HookPoint.BEFORE_CRAWL, url, config=config)
+        if ctx.skip:
+            raise ValueError(f"Crawl skipped by BEFORE_CRAWL hook for {url}")
+        crawl_url = ctx.modified_data if ctx.modified_data is not None else url
+        
         # Crawl the URL
-        result = await self.crawler.crawl(url, config)
+        result = await self.crawler.crawl(crawl_url, config)
+        
+        # Hook: AFTER_CRAWL
+        ctx = await self.hooks.run(HookPoint.AFTER_CRAWL, result, url=crawl_url, config=config)
+        if ctx.modified_data is not None:
+            result = ctx.modified_data
         
         if not result.success:
-            raise ValueError(f"Failed to crawl {url}: {result.error}")
+            raise ValueError(f"Failed to crawl {crawl_url}: {result.error}")
         
         # Perform extraction if enabled
         extracted_data = None
@@ -222,8 +244,20 @@ class WebLoader:
         
         logger.info(f"Loading {len(urls)} URLs")
         
+        # Hook: BEFORE_CRAWL for batch (pass list of URLs)
+        ctx = await self.hooks.run(HookPoint.BEFORE_CRAWL, urls, config=config, batch=True)
+        if ctx.skip:
+            logger.warning("Batch crawl skipped by BEFORE_CRAWL hook")
+            return []
+        crawl_urls = ctx.modified_data if ctx.modified_data is not None else urls
+        
         # Crawl all URLs (with link following if configured)
-        results = await self.crawler.crawl_many(urls, config)
+        results = await self.crawler.crawl_many(crawl_urls, config)
+        
+        # Hook: AFTER_CRAWL for batch
+        ctx = await self.hooks.run(HookPoint.AFTER_CRAWL, results, urls=crawl_urls, config=config, batch=True)
+        if ctx.modified_data is not None:
+            results = ctx.modified_data
         
         # Process each result
         documents: list[Document] = []
@@ -254,7 +288,7 @@ class WebLoader:
             document = self._crawl_result_to_document(result, extracted_data)
             documents.append(document)
         
-        logger.info(f"Successfully loaded {len(documents)} documents from {len(urls)} starting URLs")
+        logger.info(f"Successfully loaded {len(documents)} documents from {len(crawl_urls)} starting URLs")
         
         return documents
 

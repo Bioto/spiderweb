@@ -13,6 +13,7 @@ if TYPE_CHECKING:
     from spiderweb.extractors.base import Extractor
 
 from spiderweb.crawlers.base import CrawlResult
+from spiderweb.hooks import hooks as global_hooks
 from spiderweb.loaders.web_loader import WebLoader
 from spiderweb.models.config import (
     ChunkerConfig,
@@ -27,9 +28,10 @@ from spiderweb.models.document import Document
 from spiderweb.models.result import BatchIngestionResult, IngestionResult, QueryResult, QueryResultWithContext
 from spiderweb.observability.logging_config import get_logger
 from spiderweb.pipeline.batch import BatchProcessor
-from spiderweb.pipeline.processor import DocumentProcessor
 from spiderweb.pipeline.context import ContextRetriever
+from spiderweb.pipeline.processor import DocumentProcessor
 from spiderweb.pipeline.query_expansion import QueryExpander, reciprocal_rank_fusion
+from spiderweb.registry import chunker_registry, crawler_registry, extractor_registry
 
 logger = get_logger(__name__)
 
@@ -46,7 +48,25 @@ class Spiderweb:
         >>> async with Spiderweb(llm_client=GlueLLM()) as web:
         ...     await web.ingest("document.pdf")
         ...     results = await web.query("What is this document about?")
+
+    Extensibility:
+        Register custom components via class-level registries::
+
+            # Register a custom chunker
+            Spiderweb.chunkers.register("my-chunker", MyChunkerClass)
+
+            # Register a custom crawler
+            Spiderweb.crawlers.register("my-crawler", MyCrawlerClass)
+
+            # Add a pipeline hook
+            Spiderweb.hooks.register(HookPoint.AFTER_CHUNK, my_callback)
     """
+
+    # Class-level access to component registries for extensibility
+    chunkers = chunker_registry
+    crawlers = crawler_registry
+    extractors = extractor_registry
+    hooks = global_hooks
 
     def __init__(
         self,

@@ -4,9 +4,9 @@ These models define the configuration for chunkers, extractors, validators,
 and other pipeline components.
 """
 
-from typing import Any, Literal
+from typing import Any, Literal, Union
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from spiderweb.models.document import ChunkType
 
@@ -15,12 +15,37 @@ class ChunkerConfig(BaseModel):
     """Configuration for chunking strategies.
 
     Defines how documents should be split into chunks.
+
+    The strategy field accepts either a ChunkType enum value or a string.
+    Strings are used for custom chunkers registered in the chunker_registry.
+
+    Example:
+        # Built-in chunker using enum
+        config = ChunkerConfig(strategy=ChunkType.HIERARCHICAL)
+
+        # Custom chunker using string
+        config = ChunkerConfig(strategy="my-custom-chunker")
     """
 
-    strategy: ChunkType = Field(
+    strategy: Union[ChunkType, str] = Field(
         default=ChunkType.HIERARCHICAL,
-        description="Chunking strategy to use",
+        description="Chunking strategy to use (ChunkType enum or custom string)",
     )
+
+    @field_validator("strategy", mode="before")
+    @classmethod
+    def validate_strategy(cls, v: Any) -> Union[ChunkType, str]:
+        """Accept both ChunkType enum values and strings."""
+        if isinstance(v, ChunkType):
+            return v
+        if isinstance(v, str):
+            # Try to convert to ChunkType if it matches
+            try:
+                return ChunkType(v)
+            except ValueError:
+                # Not a known ChunkType, treat as custom strategy name
+                return v
+        raise ValueError(f"strategy must be ChunkType or str, got {type(v)}")
     max_chunk_size: int = Field(
         default=1000,
         ge=100,
@@ -434,11 +459,21 @@ class CrawlerConfig(BaseModel):
     
     Defines how URLs should be crawled, including depth control,
     link following, rate limiting, and content extraction.
+    
+    The provider field accepts any string. Built-in providers are "crawl4ai"
+    and "http". Custom crawlers can be registered in the crawler_registry.
+    
+    Example:
+        # Built-in crawler
+        config = CrawlerConfig(provider="http")
+        
+        # Custom crawler
+        config = CrawlerConfig(provider="my-custom-crawler")
     """
     
-    provider: Literal["crawl4ai", "http"] = Field(
+    provider: str = Field(
         default="crawl4ai",
-        description="Crawler backend to use",
+        description="Crawler backend to use (built-in: 'crawl4ai', 'http', or custom)",
     )
     
     # Crawl behavior
