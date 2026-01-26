@@ -170,7 +170,7 @@ spiderweb --help                         # All commands
 ## Next Steps
 
 1. ✅ Choose your setup method above
-2. 📖 Read the [Crawl Feature Documentation](_docs/CRAWL_FEATURE.md)
+2. 📖 Read the [Crawl Feature Documentation](docs/CRAWL_FEATURE.md)
 3. 🔍 Try the [Examples](examples/crawl_usage.py)
 4. 🚀 Build something awesome!
 
