@@ -55,6 +55,10 @@ dependencies = [
     # Text processing
     "nltk>=3.9.1",
     "spacy>=3.8.0",
+    # Web crawling
+    "aiohttp>=3.9.0",
+    "crawl4ai>=0.4.0",
+    "fitz>=0.0.1.dev2",
 ]
 
 [project.optional-dependencies]

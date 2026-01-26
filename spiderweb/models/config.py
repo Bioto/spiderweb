@@ -422,3 +422,160 @@ class QueryExpansionConfig(BaseModel):
             }
         }
     )
+
+
+class CrawlerConfig(BaseModel):
+    """Configuration for web crawling.
+    
+    Defines how URLs should be crawled, including depth control,
+    link following, rate limiting, and content extraction.
+    """
+    
+    provider: Literal["crawl4ai", "http"] = Field(
+        default="crawl4ai",
+        description="Crawler backend to use",
+    )
+    
+    # Crawl behavior
+    max_depth: int = Field(
+        default=1,
+        ge=1,
+        le=10,
+        description="Maximum crawl depth (1 = single page, >1 = follow links)",
+    )
+    max_pages: int = Field(
+        default=10,
+        ge=1,
+        le=1000,
+        description="Maximum number of pages to crawl",
+    )
+    follow_patterns: list[str] = Field(
+        default_factory=list,
+        description="Regex patterns for links to follow (empty = follow all)",
+    )
+    exclude_patterns: list[str] = Field(
+        default_factory=list,
+        description="Regex patterns for links to exclude",
+    )
+    respect_robots_txt: bool = Field(
+        default=True,
+        description="Respect robots.txt directives",
+    )
+    
+    # Content handling
+    wait_for_js: bool = Field(
+        default=True,
+        description="Wait for JavaScript rendering (crawl4ai only)",
+    )
+    timeout_seconds: int = Field(
+        default=30,
+        ge=1,
+        le=300,
+        description="Request timeout in seconds",
+    )
+    extract_markdown: bool = Field(
+        default=True,
+        description="Convert HTML to markdown",
+    )
+    
+    # Rate limiting
+    delay_between_requests: float = Field(
+        default=1.0,
+        ge=0.0,
+        le=10.0,
+        description="Delay between requests in seconds",
+    )
+    max_concurrent: int = Field(
+        default=5,
+        ge=1,
+        le=50,
+        description="Maximum concurrent requests",
+    )
+    
+    # Additional settings
+    user_agent: str | None = Field(
+        default=None,
+        description="Custom user agent (None = use default)",
+    )
+    extra_config: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Additional provider-specific configuration",
+    )
+    
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "provider": "crawl4ai",
+                "max_depth": 2,
+                "max_pages": 20,
+                "wait_for_js": True,
+                "extract_markdown": True,
+                "delay_between_requests": 1.0,
+            }
+        }
+    )
+
+
+class CrawlExtractionConfig(BaseModel):
+    """Configuration for LLM-powered structured extraction from crawled content.
+    
+    Enables intelligent extraction using semantic guidance, custom queries,
+    and Pydantic schema validation with optional auto-improvement.
+    """
+    
+    enabled: bool = Field(
+        default=True,
+        description="Enable LLM-powered extraction",
+    )
+    semantic_guide: str | None = Field(
+        default=None,
+        description="High-level description of what to extract (e.g., 'Look for product prices and reviews')",
+    )
+    extraction_query: str | None = Field(
+        default=None,
+        description="Specific extraction instruction or query",
+    )
+    output_schema: type[BaseModel] | None = Field(
+        default=None,
+        description="Pydantic model defining the expected output structure",
+    )
+    
+    # Auto-improve settings
+    auto_improve: bool = Field(
+        default=False,
+        description="Enable iterative improvement of extraction results",
+    )
+    max_improve_iterations: int = Field(
+        default=3,
+        ge=1,
+        le=10,
+        description="Maximum number of improvement iterations",
+    )
+    improvement_prompt: str | None = Field(
+        default=None,
+        description="Custom prompt for guiding improvements (overrides default)",
+    )
+    
+    # Extraction behavior
+    include_raw_content: bool = Field(
+        default=False,
+        description="Include raw HTML/markdown in extraction metadata",
+    )
+    temperature: float = Field(
+        default=0.0,
+        ge=0.0,
+        le=2.0,
+        description="LLM temperature for extraction (0 = deterministic)",
+    )
+    
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "enabled": True,
+                "semantic_guide": "Extract product information including price, description, and customer reviews",
+                "auto_improve": True,
+                "max_improve_iterations": 3,
+                "temperature": 0.0,
+            }
+        }
+    )

@@ -226,10 +226,13 @@ async def _ingest(
     # Create extractor
     extractor = None
     if use_ocr:
-        from spiderweb.extractors.ocr import OCRExtractor
-
-        console.print("[yellow]Using OCR extraction (this will be slower)[/yellow]")
-        extractor = OCRExtractor(dpi=150)
+        try:
+            from spiderweb.extractors.ocr import OCRExtractor
+            console.print("[yellow]Using OCR extraction (this will be slower)[/yellow]")
+            extractor = OCRExtractor(dpi=150)
+        except ImportError:
+            console.print("[red]Error: OCR dependencies not installed. Install with: pip install spiderweb[ocr][/red]")
+            return
 
     # Create Spiderweb client
     web = Spiderweb(

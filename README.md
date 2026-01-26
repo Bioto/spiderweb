@@ -18,6 +18,11 @@ Spiderweb takes raw documents (PDFs, Word docs, markdown, etc.) and transforms t
 
 ## Features
 
+- 🕸️ **Web Crawling** - Intelligent web scraping with local file storage
+  - Simple HTTP and advanced Playwright-based crawlers
+  - LLM-powered structured data extraction
+  - Save to local files (markdown, HTML, JSON) and/or vector store
+  - Auto-improvement for extraction accuracy
 - 📄 **Multi-Format Extraction** - PDF, Word, Excel, PowerPoint, Markdown, and more via markitdown
 - 🧩 **Smart Chunking Strategies**
   - Hierarchical (preserves document structure)
@@ -58,6 +63,31 @@ uv pip install -e ".[dev]"
 ```
 
 ## Quick Start
+
+### Option 1: Docker (Recommended for Crawling)
+
+Docker setup includes Playwright with browsers pre-installed - perfect for web crawling!
+
+```bash
+# 1. Set up environment
+cp env.example .env
+# Edit .env with your API keys
+
+# 2. Start services (Spiderweb + Qdrant)
+docker-compose up -d
+
+# 3. Use the CLI
+docker-compose exec spiderweb spiderweb crawl https://example.com
+
+# Or use the Makefile
+make build
+make up
+make crawl URL=https://example.com
+```
+
+See [DOCKER_QUICKSTART.md](DOCKER_QUICKSTART.md) for more details.
+
+### Option 2: Local Installation
 
 ### Basic Document Ingestion
 
@@ -104,6 +134,60 @@ async def main():
 
 asyncio.run(main())
 ```
+
+### Web Crawling with Local Storage
+
+Spiderweb can crawl web content and save it to local files for backup, analysis, or archiving:
+
+```python
+from spiderweb import Spiderweb
+from spiderweb.models.config import CrawlerConfig
+from gluellm import GlueLLM
+
+async def main():
+    web = Spiderweb(llm_client=GlueLLM())
+    
+    # Crawl and save to local files
+    result = await web.crawl(
+        url="https://example.com",
+        crawler_config=CrawlerConfig(
+            provider="crawl4ai",  # or "http" for simple GET
+            max_depth=2,          # Follow links 2 levels deep
+            max_pages=10,
+        ),
+        save_to="./crawled_data",      # Save to local directory
+        save_format="all",              # Save markdown, HTML, JSON
+        ingest=True,                    # Also ingest to vector store
+    )
+    
+    print(f"Crawled {result.total_documents} pages")
+    print(f"Saved to: ./crawled_data/")
+    print(f"Ingested {result.total_chunks} chunks to vector store")
+
+asyncio.run(main())
+```
+
+**CLI Usage:**
+
+```bash
+# Simple crawl and save
+spiderweb crawl https://example.com --save-to ./crawled
+
+# Crawl with depth and save as markdown
+spiderweb crawl https://docs.example.com \
+  --depth 3 \
+  --max-pages 100 \
+  --save-to ./docs-backup \
+  --save-format markdown
+
+# Crawl, save locally AND ingest to vector store (best of both worlds!)
+spiderweb crawl https://example.com \
+  --save-to ./backup \
+  --ingest \
+  --store qdrant://localhost:6333/docs
+```
+
+See [LOCAL_STORAGE.md](./_docs/LOCAL_STORAGE.md) for complete documentation.
 
 ### Batch Processing
 

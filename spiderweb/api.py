@@ -12,7 +12,17 @@ if TYPE_CHECKING:
 
     from spiderweb.extractors.base import Extractor
 
-from spiderweb.models.config import ChunkerConfig, ValidatorConfig, VectorStoreConfig, ContextWindowConfig, QueryExpansionConfig
+from spiderweb.crawlers.base import CrawlResult
+from spiderweb.loaders.web_loader import WebLoader
+from spiderweb.models.config import (
+    ChunkerConfig,
+    ContextWindowConfig,
+    CrawlExtractionConfig,
+    CrawlerConfig,
+    QueryExpansionConfig,
+    ValidatorConfig,
+    VectorStoreConfig,
+)
 from spiderweb.models.document import Document
 from spiderweb.models.result import BatchIngestionResult, IngestionResult, QueryResult, QueryResultWithContext
 from spiderweb.observability.logging_config import get_logger
@@ -319,6 +329,274 @@ class Spiderweb:
             expanded_queries=expanded_queries,
             expansion_strategy=expansion_strategy,
             rrf_scores=rrf_scores_list,
+        )
+
+    async def crawl(
+        self,
+        url: str | list[str],
+        crawler_config: CrawlerConfig | None = None,
+        extraction_config: CrawlExtractionConfig | None = None,
+        output_schema: type | None = None,
+        ingest: bool = False,
+        save_to: str | Path | None = None,
+        save_format: str = "all",
+    ) -> CrawlResult | list[CrawlResult] | IngestionResult | BatchIngestionResult:
+        """Crawl URL(s) with optional structured extraction and ingestion.
+        
+        Args:
+            url: Single URL or list of URLs to crawl
+            crawler_config: Optional crawler configuration
+            extraction_config: Optional extraction configuration for LLM-powered data extraction
+            output_schema: Optional Pydantic schema for structured extraction
+            ingest: If True, ingest crawled content into vector store
+            save_to: Optional directory to save crawled content locally
+            save_format: Format for saved files - "markdown", "html", "json", or "all"
+            
+        Returns:
+            CrawlResult(s) if ingest=False, otherwise IngestionResult(s)
+            
+        Example:
+            >>> # Basic crawl
+            >>> result = await web.crawl("https://example.com")
+            >>> print(result.markdown)
+            >>>
+            >>> # Crawl and save to local files
+            >>> result = await web.crawl(
+            ...     "https://example.com",
+            ...     save_to="./crawled_data",
+            ...     save_format="markdown",
+            ... )
+            >>>
+            >>> # Crawl with schema extraction
+            >>> from pydantic import BaseModel
+            >>> class Product(BaseModel):
+            ...     name: str
+            ...     price: float
+            >>> result = await web.crawl(
+            ...     "https://store.com/product",
+            ...     output_schema=Product,
+            ...     extraction_config=CrawlExtractionConfig(
+            ...         semantic_guide="Extract product information",
+            ...         auto_improve=True,
+            ...     ),
+            ... )
+            >>>
+            >>> # Crawl and ingest
+            >>> result = await web.crawl(
+            ...     "https://docs.example.com",
+            ...     ingest=True,
+            ... )
+            >>>
+            >>> # Crawl, save locally AND ingest
+            >>> result = await web.crawl(
+            ...     "https://example.com",
+            ...     save_to="./backup",
+            ...     ingest=True,
+            ... )
+        """
+        # Create web loader
+        web_loader = WebLoader(
+            llm_client=self.llm_client,
+            crawler_config=crawler_config,
+            extraction_config=extraction_config,
+        )
+        
+        # Initialize file storage if requested
+        storage = None
+        if save_to:
+            from spiderweb.crawlers.storage import CrawlStorage
+            storage = CrawlStorage(output_dir=save_to)
+            logger.info(f"Will save crawled content to {save_to}")
+        
+        is_list = isinstance(url, list)
+        urls = url if is_list else [url]
+        
+        logger.info(f"Crawling {len(urls)} URL(s) (ingest={ingest}, save_to={save_to})")
+        
+        if not ingest:
+            # Just crawl and return raw results
+            if is_list or (crawler_config and crawler_config.max_depth > 1):
+                # Use crawl_many for multiple URLs or link following
+                results = await web_loader.crawler.crawl_many(urls, crawler_config)
+                
+                # Save to local storage if requested
+                if storage:
+                    for result in results:
+                        if isinstance(result, CrawlResult):
+                            storage.save_crawl_result(result, format=save_format)
+                    storage.create_index()
+                
+                return results
+            else:
+                # Single URL, simple crawl
+                result = await web_loader.crawler.crawl(urls[0], crawler_config)
+                
+                # Save to local storage if requested
+                if storage and isinstance(result, CrawlResult):
+                    storage.save_crawl_result(result, format=save_format)
+                
+                return result
+        
+        else:
+            # Crawl and ingest into vector store
+            if is_list or (crawler_config and crawler_config.max_depth > 1):
+                # Load multiple documents
+                documents = await web_loader.load_many(
+                    urls,
+                    crawler_config=crawler_config,
+                    extraction_config=extraction_config,
+                    output_schema=output_schema,
+                )
+                
+                # Ingest each document
+                results = []
+                for doc in documents:
+                    # Process through pipeline
+                    # Note: We already have the Document, so we skip file loading
+                    # and just chunk/embed/store
+                    doc.chunks = self.document_processor.chunker.chunk(doc)
+                    
+                    if self.document_processor.enable_validation and self.document_processor.validator:
+                        validation_results = await self.document_processor.validator.validate_batch(doc.chunks)
+                        valid_chunks = [
+                            chunk for chunk, result in zip(doc.chunks, validation_results)
+                            if result.passed
+                        ]
+                        doc.chunks = valid_chunks
+                    
+                    if self.document_processor.enable_embedding and self.llm_client:
+                        doc.chunks = await self.document_processor._generate_embeddings(doc.chunks)
+                    
+                    if doc.chunks:
+                        chunks_with_embeddings = [c for c in doc.chunks if c.embedding is not None]
+                        if chunks_with_embeddings:
+                            await self.document_processor.vector_store.upsert(chunks_with_embeddings)
+                    
+                    results.append(IngestionResult(
+                        document=doc,
+                        success=True,
+                        chunks_created=len(doc.chunks),
+                        chunks_validated=len(doc.chunks),
+                        chunks_rejected=0,
+                        processing_time_seconds=0.0,
+                        embedding_time_seconds=0.0,
+                        errors=[],
+                        warnings=[],
+                    ))
+                
+                # Create batch result
+                return BatchIngestionResult(
+                    total_documents=len(documents),
+                    successful_documents=len(results),
+                    failed_documents=0,
+                    total_chunks=sum(r.chunks_created for r in results),
+                    total_chunks_validated=sum(r.chunks_validated for r in results),
+                    total_chunks_rejected=sum(r.chunks_rejected for r in results),
+                    processing_time_seconds=sum(r.processing_time_seconds for r in results),
+                    average_time_per_document=sum(r.processing_time_seconds for r in results) / len(results) if results else 0.0,
+                    errors={},
+                )
+            
+            else:
+                # Single document
+                doc = await web_loader.load(
+                    urls[0],
+                    crawler_config=crawler_config,
+                    extraction_config=extraction_config,
+                    output_schema=output_schema,
+                )
+                
+                # Process through pipeline
+                doc.chunks = self.document_processor.chunker.chunk(doc)
+                
+                if self.document_processor.enable_validation and self.document_processor.validator:
+                    validation_results = await self.document_processor.validator.validate_batch(doc.chunks)
+                    valid_chunks = [
+                        chunk for chunk, result in zip(doc.chunks, validation_results)
+                        if result.passed
+                    ]
+                    doc.chunks = valid_chunks
+                
+                if self.document_processor.enable_embedding and self.llm_client:
+                    doc.chunks = await self.document_processor._generate_embeddings(doc.chunks)
+                
+                if doc.chunks:
+                    chunks_with_embeddings = [c for c in doc.chunks if c.embedding is not None]
+                    if chunks_with_embeddings:
+                        await self.document_processor.vector_store.upsert(chunks_with_embeddings)
+                
+                return IngestionResult(
+                    document=doc,
+                    success=True,
+                    chunks_created=len(doc.chunks),
+                    chunks_validated=len(doc.chunks),
+                    chunks_rejected=0,
+                    processing_time_seconds=0.0,
+                    embedding_time_seconds=0.0,
+                    errors=[],
+                    warnings=[],
+                )
+
+    async def crawl_and_query(
+        self,
+        query: str,
+        urls: list[str],
+        crawler_config: CrawlerConfig | None = None,
+        extraction_config: CrawlExtractionConfig | None = None,
+        top_k: int = 10,
+        filter_dict: dict | None = None,
+        context_window: ContextWindowConfig | None = None,
+        query_expansion: QueryExpansionConfig | None = None,
+    ) -> QueryResult | QueryResultWithContext:
+        """Crawl URLs, ingest content temporarily, then query combined with existing store.
+        
+        This method crawls fresh content from the web, processes it through the pipeline,
+        and queries it along with any existing content in the vector store.
+        
+        Args:
+            query: Query string
+            urls: List of URLs to crawl for fresh content
+            crawler_config: Optional crawler configuration
+            extraction_config: Optional extraction configuration
+            top_k: Number of results to return
+            filter_dict: Optional metadata filters
+            context_window: Optional context window configuration
+            query_expansion: Optional query expansion configuration
+            
+        Returns:
+            Query result with matched chunks from both fresh and existing content
+            
+        Example:
+            >>> results = await web.crawl_and_query(
+            ...     query="What are the latest pricing changes?",
+            ...     urls=["https://company.com/pricing"],
+            ...     extraction_config=CrawlExtractionConfig(
+            ...         semantic_guide="Focus on pricing tiers and recent updates",
+            ...     ),
+            ... )
+            >>> for chunk in results.chunks:
+            ...     print(chunk["content"])
+        """
+        if not self.llm_client:
+            raise ValueError("LLM client required for crawl_and_query")
+        
+        logger.info(f"Crawl and query: crawling {len(urls)} URLs then querying with: {query}")
+        
+        # Crawl and ingest the URLs
+        await self.crawl(
+            url=urls,
+            crawler_config=crawler_config,
+            extraction_config=extraction_config,
+            ingest=True,
+        )
+        
+        # Now query the vector store (includes fresh content)
+        return await self.query(
+            query=query,
+            top_k=top_k,
+            filter_dict=filter_dict,
+            context_window=context_window,
+            query_expansion=query_expansion,
         )
 
     async def __aenter__(self):

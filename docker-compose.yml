@@ -1,17 +1,51 @@
 version: '3.8'
 
 services:
-  gluellm-app:
+  # Spiderweb main application
+  spiderweb:
     build: .
+    container_name: spiderweb
     environment:
-      - GLUELLM_DEFAULT_MODEL=${GLUELLM_DEFAULT_MODEL:-openai:gpt-4o-mini}
-      - GLUELLM_LOG_LEVEL=${GLUELLM_LOG_LEVEL:-INFO}
-      - GLUELLM_MAX_TOOL_ITERATIONS=${GLUELLM_MAX_TOOL_ITERATIONS:-10}
+      # API Keys
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
-      - XAI_API_KEY=${XAI_API_KEY:-}
+      
+      # Spiderweb settings
+      - SPIDERWEB_LOG_LEVEL=${SPIDERWEB_LOG_LEVEL:-INFO}
+      - SPIDERWEB_EMBEDDING_MODEL=${SPIDERWEB_EMBEDDING_MODEL:-openai:text-embedding-3-small}
+      
+      # Playwright settings (browsers pre-installed in root cache)
+      - PLAYWRIGHT_BROWSERS_PATH=/root/.cache/ms-playwright
     volumes:
       - ./logs:/app/logs
+      - ./data:/app/data
+      - ./examples:/app/examples
+    depends_on:
+      - qdrant
     restart: unless-stopped
-    # Override command as needed
-    # command: ["python", "your_app.py"]
+    command: ["tail", "-f", "/dev/null"]  # Keep container running for CLI usage
+    networks:
+      - spiderweb-network
+
+  # Qdrant vector database
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: spiderweb-qdrant
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant_storage:/qdrant/storage
+    environment:
+      - QDRANT__SERVICE__GRPC_PORT=6334
+    networks:
+      - spiderweb-network
+    restart: unless-stopped
+
+volumes:
+  qdrant_storage:
+    driver: local
+
+networks:
+  spiderweb-network:
+    driver: bridge

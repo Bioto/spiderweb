@@ -43,7 +43,20 @@ Configuration:
 
 from spiderweb.api import Spiderweb, ingest, process_directory, query
 from spiderweb.config import SpiderwebSettings, get_settings, settings
-from spiderweb.models.config import ChunkerConfig, ValidatorConfig, VectorStoreConfig, ContextWindowConfig
+from spiderweb.crawlers.base import Crawler, CrawlResult
+from spiderweb.crawlers.crawl4ai import Crawl4AICrawler
+from spiderweb.crawlers.extraction import CrawlExtractor
+from spiderweb.crawlers.http import HttpCrawler
+from spiderweb.loaders.web_loader import WebLoader
+from spiderweb.models.config import (
+    ChunkerConfig,
+    ContextWindowConfig,
+    CrawlExtractionConfig,
+    CrawlerConfig,
+    QueryExpansionConfig,
+    ValidatorConfig,
+    VectorStoreConfig,
+)
 
 __all__ = [
     # Main API
@@ -51,6 +64,13 @@ __all__ = [
     "ingest",
     "query",
     "process_directory",
+    # Crawlers
+    "Crawler",
+    "CrawlResult",
+    "HttpCrawler",
+    "Crawl4AICrawler",
+    "CrawlExtractor",
+    "WebLoader",
     # Configuration
     "SpiderwebSettings",
     "settings",
@@ -59,6 +79,9 @@ __all__ = [
     "ValidatorConfig",
     "VectorStoreConfig",
     "ContextWindowConfig",
+    "QueryExpansionConfig",
+    "CrawlerConfig",
+    "CrawlExtractionConfig",
 ]
 
 __version__ = "0.1.0"

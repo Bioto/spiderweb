@@ -11,10 +11,31 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from gluellm import GlueLLM
+    import fitz  # PyMuPDF
+    import pytesseract
+    from PIL import Image
 
-import fitz  # PyMuPDF
-import pytesseract
-from PIL import Image
+# Lazy imports for optional dependencies
+def _get_fitz():
+    try:
+        import fitz
+        return fitz
+    except ImportError:
+        raise ImportError("PyMuPDF not installed. Install with: pip install pymupdf")
+
+def _get_pytesseract():
+    try:
+        import pytesseract
+        return pytesseract
+    except ImportError:
+        raise ImportError("pytesseract not installed. Install with: pip install pytesseract")
+
+def _get_pil_image():
+    try:
+        from PIL import Image
+        return Image
+    except ImportError:
+        raise ImportError("PIL not installed. Install with: pip install pillow")
 
 from spiderweb.models.document import Document, DocumentMetadata
 from spiderweb.models.progressive import (
@@ -87,6 +108,7 @@ class ProgressiveRAGProcessor:
         """
         logger.info(f"Extracting pages from {pdf_path.name} (OCR={'enabled' if self.use_ocr else 'disabled'})")
 
+        fitz = _get_fitz()
         doc = fitz.open(pdf_path)
         pages = []
 
@@ -100,6 +122,11 @@ class ProgressiveRAGProcessor:
                 # Render page as image
                 pix = page.get_pixmap(dpi=self.ocr_dpi)
                 img_data = pix.tobytes("png")
+                
+                # Use lazy imports
+                Image = _get_pil_image()
+                pytesseract = _get_pytesseract()
+                
                 img = Image.open(io.BytesIO(img_data))
 
                 # OCR the image
@@ -253,6 +280,7 @@ class ProgressiveRAGProcessor:
         logger.info(f"Fully processing page {page_number} of {file_path.name}")
 
         # Extract just this page
+        fitz = _get_fitz()
         doc = fitz.open(file_path)
         page = doc[page_number - 1]  # 0-indexed
 
@@ -261,6 +289,10 @@ class ProgressiveRAGProcessor:
             logger.debug(f"OCR processing page {page_number} for full processing")
             pix = page.get_pixmap(dpi=self.ocr_dpi)
             img_data = pix.tobytes("png")
+            # Use lazy imports
+            Image = _get_pil_image()
+            pytesseract = _get_pytesseract()
+            
             img = Image.open(io.BytesIO(img_data))
             page_text = pytesseract.image_to_string(img)
         else:
