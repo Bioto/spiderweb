@@ -6,7 +6,7 @@ and other pipeline components.
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from spiderweb.models.document import ChunkType
 
@@ -360,8 +360,8 @@ class ContextWindowConfig(BaseModel):
         description="Number of pages/chunks to add per expansion step",
     )
 
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "enabled": True,
                 "chunks_before": 3,
@@ -372,3 +372,53 @@ class ContextWindowConfig(BaseModel):
                 "semantic_min_score": 0.6,
             }
         }
+    )
+
+
+class QueryExpansionConfig(BaseModel):
+    """Configuration for query expansion strategies.
+    
+    Query expansion improves search recall by generating multiple query
+    variations (multi-query) or hypothetical answers (HyDE) and combining
+    results using Reciprocal Rank Fusion.
+    """
+
+    enabled: bool = Field(
+        default=False,
+        description="Enable query expansion (opt-in feature)",
+    )
+    strategy: Literal["multi_query", "hyde"] = Field(
+        default="multi_query",
+        description="Expansion strategy: multi_query for reformulations, hyde for hypothetical answers",
+    )
+    custom_prompt: str | None = Field(
+        default=None,
+        description="Custom prompt for query expansion (overrides default)",
+    )
+    num_expansions: int = Field(
+        default=3,
+        ge=1,
+        le=10,
+        description="Number of query expansions to generate (for multi-query strategy)",
+    )
+    include_original: bool = Field(
+        default=True,
+        description="Include the original query in addition to expanded queries",
+    )
+    rrf_k: int = Field(
+        default=60,
+        ge=1,
+        description="RRF constant k for rank fusion (higher = less aggressive downranking)",
+    )
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "enabled": True,
+                "strategy": "multi_query",
+                "num_expansions": 3,
+                "include_original": True,
+                "rrf_k": 60,
+            }
+        }
+    )

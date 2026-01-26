@@ -7,7 +7,7 @@ like ingestion, validation, and batch processing.
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from spiderweb.models.document import Document
 
@@ -228,9 +228,22 @@ class QueryResult(BaseModel):
     total_results: int = Field(
         description="Total number of results returned",
     )
+    # Query expansion metadata
+    expanded_queries: list[str] | None = Field(
+        default=None,
+        description="List of expanded queries used (if query expansion was enabled)",
+    )
+    expansion_strategy: str | None = Field(
+        default=None,
+        description="Expansion strategy used: 'multi_query' or 'hyde' (if enabled)",
+    )
+    rrf_scores: list[float] | None = Field(
+        default=None,
+        description="Reciprocal Rank Fusion scores (if query expansion was enabled)",
+    )
 
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "query": "What is machine learning?",
                 "chunks": [{"id": "chunk_1", "content": "Machine learning is..."}],
@@ -239,6 +252,7 @@ class QueryResult(BaseModel):
                 "total_results": 1,
             }
         }
+    )
 
 
 class ContextChunk(BaseModel):

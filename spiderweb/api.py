@@ -12,13 +12,14 @@ if TYPE_CHECKING:
 
     from spiderweb.extractors.base import Extractor
 
-from spiderweb.models.config import ChunkerConfig, ValidatorConfig, VectorStoreConfig, ContextWindowConfig
+from spiderweb.models.config import ChunkerConfig, ValidatorConfig, VectorStoreConfig, ContextWindowConfig, QueryExpansionConfig
 from spiderweb.models.document import Document
 from spiderweb.models.result import BatchIngestionResult, IngestionResult, QueryResult, QueryResultWithContext
 from spiderweb.observability.logging_config import get_logger
 from spiderweb.pipeline.batch import BatchProcessor
 from spiderweb.pipeline.processor import DocumentProcessor
 from spiderweb.pipeline.context import ContextRetriever
+from spiderweb.pipeline.query_expansion import QueryExpander, reciprocal_rank_fusion
 
 logger = get_logger(__name__)
 
@@ -178,6 +179,7 @@ class Spiderweb:
         top_k: int = 10,
         filter_dict: dict | None = None,
         context_window: ContextWindowConfig | None = None,
+        query_expansion: QueryExpansionConfig | None = None,
     ) -> QueryResult | QueryResultWithContext:
         """Query the vector store.
 
@@ -186,6 +188,7 @@ class Spiderweb:
             top_k: Number of results to return
             filter_dict: Optional metadata filters
             context_window: Optional context window configuration for surrounding chunks
+            query_expansion: Optional query expansion configuration for improved recall
 
         Returns:
             Query result with matched chunks, optionally with context
@@ -200,16 +203,54 @@ class Spiderweb:
 
         start_time = time.time()
 
-        # Generate query embedding
-        embedding_result = await self.llm_client.embed(query)
-        query_embedding = embedding_result.embeddings[0]
+        # Handle query expansion if enabled
+        expanded_queries = None
+        expansion_strategy = None
+        rrf_scores_list = None
+        
+        if query_expansion and query_expansion.enabled:
+            logger.info(f"Query expansion enabled with strategy: {query_expansion.strategy}")
+            
+            # Expand the query
+            expander = QueryExpander(self.llm_client, query_expansion)
+            expanded_queries = await expander.expand(query)
+            expansion_strategy = query_expansion.strategy
+            
+            logger.debug(f"Expanded into {len(expanded_queries)} queries: {expanded_queries}")
+            
+            # Search with each expanded query
+            all_query_results = []
+            for exp_query in expanded_queries:
+                # Generate embedding for this query
+                embedding_result = await self.llm_client.embed(exp_query)
+                query_embedding = embedding_result.embeddings[0]
+                
+                # Search vector store
+                results = await self.document_processor.vector_store.query(
+                    embedding=query_embedding,
+                    top_k=top_k,
+                    filter_dict=filter_dict,
+                )
+                all_query_results.append(results)
+            
+            # Combine results using Reciprocal Rank Fusion
+            results = reciprocal_rank_fusion(all_query_results, k=query_expansion.rrf_k)
+            
+            # Limit to top_k after fusion
+            results = results[:top_k]
+            
+        else:
+            # Standard single query path
+            # Generate query embedding
+            embedding_result = await self.llm_client.embed(query)
+            query_embedding = embedding_result.embeddings[0]
 
-        # Search vector store
-        results = await self.document_processor.vector_store.query(
-            embedding=query_embedding,
-            top_k=top_k,
-            filter_dict=filter_dict,
-        )
+            # Search vector store
+            results = await self.document_processor.vector_store.query(
+                embedding=query_embedding,
+                top_k=top_k,
+                filter_dict=filter_dict,
+            )
 
         execution_time = time.time() - start_time
 
@@ -230,6 +271,10 @@ class Spiderweb:
             )
             scores.append(score)
             matched_chunks.append(chunk)
+
+        # Save RRF scores if expansion was used
+        if query_expansion and query_expansion.enabled:
+            rrf_scores_list = scores.copy()
 
         # Retrieve context if requested
         if context_window:
@@ -260,6 +305,9 @@ class Spiderweb:
                 total_results=len(chunks),
                 context_by_match=context_by_match,
                 all_context_chunks=all_context_chunks,
+                expanded_queries=expanded_queries,
+                expansion_strategy=expansion_strategy,
+                rrf_scores=rrf_scores_list,
             )
 
         return QueryResult(
@@ -268,6 +316,9 @@ class Spiderweb:
             scores=scores,
             execution_time_seconds=execution_time,
             total_results=len(chunks),
+            expanded_queries=expanded_queries,
+            expansion_strategy=expansion_strategy,
+            rrf_scores=rrf_scores_list,
         )
 
     async def __aenter__(self):
@@ -368,6 +419,7 @@ async def query(
     vector_store_url: str | None = None,
     top_k: int = 10,
     context_window: ContextWindowConfig | None = None,
+    query_expansion: QueryExpansionConfig | None = None,
 ) -> QueryResult | QueryResultWithContext:
     """Quick vector store query.
 
@@ -377,6 +429,7 @@ async def query(
         vector_store_url: Vector store connection URL
         top_k: Number of results
         context_window: Optional context window configuration
+        query_expansion: Optional query expansion configuration
 
     Returns:
         Query result, optionally with context
@@ -384,11 +437,13 @@ async def query(
     Example:
         >>> from gluellm import GlueLLM
         >>> from spiderweb import query
+        >>> from spiderweb.models.config import QueryExpansionConfig
         >>>
         >>> results = await query(
         ...     "What is machine learning?",
         ...     llm_client=GlueLLM(),
         ...     top_k=5,
+        ...     query_expansion=QueryExpansionConfig(enabled=True),
         ... )
         >>> for chunk in results.chunks:
         ...     print(chunk["content"])
@@ -398,4 +453,9 @@ async def query(
         vector_store_url=vector_store_url,
     )
 
-    return await web.query(query_text, top_k=top_k, context_window=context_window)
+    return await web.query(
+        query_text,
+        top_k=top_k,
+        context_window=context_window,
+        query_expansion=query_expansion,
+    )

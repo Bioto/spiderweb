@@ -33,8 +33,9 @@ Spiderweb takes raw documents (PDFs, Word docs, markdown, etc.) and transforms t
   - Qdrant (local and cloud)
   - In-memory (for development)
   - Extensible for custom stores
+- 🔍 **Query Expansion** - Multi-query and HyDE strategies for improved recall
 - ⚡ **Batch Processing** - Process thousands of documents efficiently
-- 🔍 **Progressive Query** - Start querying before all documents are processed
+- 🎯 **Progressive Query** - Start querying before all documents are processed
 - 🎯 **Type-Safe Configuration** - Pydantic models for all settings
 - 🛠️ **CLI Tools** - Command-line interface for common operations
 
@@ -121,6 +122,39 @@ async def main():
     print(f"Processed {result.successful_documents}/{result.total_documents} documents")
     print(f"Total chunks: {result.total_chunks}")
     print(f"Average time: {result.average_time_per_document:.2f}s per document")
+
+asyncio.run(main())
+```
+
+### Query Expansion for Better Results
+
+```python
+from spiderweb import Spiderweb
+from spiderweb.models.config import QueryExpansionConfig
+from gluellm import GlueLLM
+
+async def main():
+    web = Spiderweb(
+        llm_client=GlueLLM(),
+        vector_store_url="qdrant://localhost:6333/docs"
+    )
+    
+    # Enable query expansion for improved recall
+    expansion_config = QueryExpansionConfig(
+        enabled=True,
+        strategy="multi_query",  # or "hyde"
+        num_expansions=3,
+    )
+    
+    results = await web.query(
+        "machine learning algorithms",
+        top_k=10,
+        query_expansion=expansion_config,
+    )
+    
+    print(f"Expanded queries used: {results.expanded_queries}")
+    for chunk in results.chunks:
+        print(f"Score: {chunk['score']:.3f} - {chunk['content'][:100]}...")
 
 asyncio.run(main())
 ```
@@ -393,6 +427,170 @@ config = VectorStoreConfig(
 web = Spiderweb(llm_client=llm, store_config=config)
 ```
 
+## Query Expansion
+
+Improve search recall by automatically generating multiple query variations or hypothetical answers. Query expansion helps match documents even when they use different vocabulary than your query.
+
+### What is Query Expansion?
+
+Query expansion transforms a single query into multiple queries to improve retrieval:
+
+- **Multi-Query:** Generates alternative phrasings with different vocabulary
+- **HyDE (Hypothetical Document Embeddings):** Creates a hypothetical answer, then searches for documents matching that answer
+
+Results from all queries are combined using **Reciprocal Rank Fusion (RRF)** for robust ranking.
+
+### Multi-Query Strategy
+
+Generates multiple reformulations of your query to match different vocabularies:
+
+```python
+from spiderweb import Spiderweb
+from spiderweb.models.config import QueryExpansionConfig
+
+web = Spiderweb(llm_client=llm, vector_store_url="qdrant://localhost:6333/docs")
+
+# Enable multi-query expansion
+expansion_config = QueryExpansionConfig(
+    enabled=True,
+    strategy="multi_query",
+    num_expansions=3,
+    include_original=True,  # Also search with original query
+)
+
+results = await web.query(
+    "What is machine learning?",
+    top_k=10,
+    query_expansion=expansion_config,
+)
+
+# Results include expansion metadata
+print(f"Expanded queries: {results.expanded_queries}")
+print(f"Strategy used: {results.expansion_strategy}")
+```
+
+**When to use:** When users might phrase queries differently than document vocabulary (e.g., "ML" vs "machine learning", "fix" vs "repair")
+
+### HyDE Strategy
+
+Generates a hypothetical answer first, then searches for similar content:
+
+```python
+expansion_config = QueryExpansionConfig(
+    enabled=True,
+    strategy="hyde",
+    num_expansions=1,
+)
+
+results = await web.query(
+    "How do I train a neural network?",
+    top_k=10,
+    query_expansion=expansion_config,
+)
+```
+
+**When to use:** When you want to match document-style writing rather than question-style queries. Works well for technical content.
+
+### Custom Prompts
+
+Tailor the expansion to your domain:
+
+```python
+# Custom multi-query prompt
+custom_prompt = """Generate {num_expansions} alternative questions about software engineering.
+Focus on technical terminology and different phrasings developers might use.
+
+Query: {query}
+
+Alternative questions:"""
+
+expansion_config = QueryExpansionConfig(
+    enabled=True,
+    strategy="multi_query",
+    custom_prompt=custom_prompt,
+    num_expansions=5,
+)
+
+# Custom HyDE prompt
+hyde_prompt = """Write a technical paragraph that would appear in API documentation 
+answering this query. Use specific function names and code terminology.
+
+Query: {query}
+
+Documentation excerpt:"""
+
+expansion_config = QueryExpansionConfig(
+    enabled=True,
+    strategy="hyde",
+    custom_prompt=hyde_prompt,
+)
+```
+
+### CLI Usage
+
+Query expansion is available through the CLI:
+
+```bash
+# Basic multi-query expansion
+spiderweb query "machine learning algorithms" \
+  --expand \
+  --top-k 10
+
+# HyDE strategy
+spiderweb query "How to optimize Python code?" \
+  --expand \
+  --expand-strategy hyde \
+  --expand-num 2
+
+# Show expanded queries with verbose mode
+spiderweb query "neural networks" \
+  --expand \
+  --expand-num 5 \
+  --verbose \
+  --show-scores
+
+# Custom prompt (for specialized domains)
+spiderweb query "database indexing" \
+  --expand \
+  --expand-prompt "Generate {num_expansions} technical variations: {query}"
+```
+
+### Advanced Configuration
+
+Fine-tune the RRF algorithm:
+
+```python
+expansion_config = QueryExpansionConfig(
+    enabled=True,
+    strategy="multi_query",
+    num_expansions=4,
+    include_original=True,
+    rrf_k=60,  # RRF constant (higher = less aggressive downranking)
+)
+```
+
+### Best Practices
+
+**Multi-Query:**
+- Use 3-5 expansions for good coverage without redundancy
+- Include original query for safety
+- Works best with general vocabulary mismatches
+
+**HyDE:**
+- Use 1-2 expansions (more can be redundant)
+- Excellent for technical/domain-specific content
+- Can struggle with very short or ambiguous queries
+
+**Custom Prompts:**
+- Include `{query}` and `{num_expansions}` placeholders
+- Be specific about desired output format
+- Test prompts with your document domain
+
+**Performance:**
+- Query expansion adds LLM calls (slower, costs API credits)
+- Cache expansion results for repeated queries
+- Consider enabling only for complex queries
+
 ## Configuration
 
 Spiderweb uses environment variables for configuration, following the `SPIDERWEB_` prefix convention.
@@ -488,6 +686,20 @@ spiderweb query "What is machine learning?" --top-k 5
 spiderweb query "Python tutorials" \
   --vector-store qdrant://localhost:6333/docs \
   --top-k 10 \
+  --show-scores
+
+# With query expansion for better recall
+spiderweb query "neural networks" \
+  --expand \
+  --expand-strategy multi_query \
+  --expand-num 3 \
+  --top-k 10
+
+# HyDE expansion with verbose output
+spiderweb query "How to deploy ML models?" \
+  --expand \
+  --expand-strategy hyde \
+  --verbose \
   --show-scores
 ```
 

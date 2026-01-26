@@ -9,7 +9,7 @@ from rich.panel import Panel
 
 from spiderweb.api import Spiderweb
 from spiderweb.config import settings
-from spiderweb.models.config import ContextWindowConfig
+from spiderweb.models.config import ContextWindowConfig, QueryExpansionConfig
 
 console = Console()
 
@@ -63,6 +63,35 @@ console = Console()
     default=None,
     help="Prompt to guide semantic context selection",
 )
+@click.option(
+    "--expand",
+    is_flag=True,
+    help="Enable query expansion for improved recall",
+)
+@click.option(
+    "--expand-strategy",
+    type=click.Choice(["multi_query", "hyde"]),
+    default="multi_query",
+    help="Query expansion strategy (multi_query or hyde)",
+)
+@click.option(
+    "--expand-prompt",
+    type=str,
+    default=None,
+    help="Custom prompt for query expansion",
+)
+@click.option(
+    "--expand-num",
+    type=int,
+    default=3,
+    help="Number of query expansions to generate",
+)
+@click.option(
+    "--verbose",
+    "-v",
+    is_flag=True,
+    help="Show expanded queries and additional details",
+)
 def query_cmd(
     query_text: str,
     store: str | None,
@@ -73,6 +102,11 @@ def query_cmd(
     context_after: int | None,
     context_mode: str | None,
     semantic_guide: str | None,
+    expand: bool,
+    expand_strategy: str,
+    expand_prompt: str | None,
+    expand_num: int,
+    verbose: bool,
 ):
     """Query the vector store.
 
@@ -97,6 +131,14 @@ def query_cmd(
       \b
       # Query with semantic guidance
       spiderweb query "revenue Q4" --semantic-guide "financial metrics and KPIs"
+      
+      \b
+      # Query with expansion for improved recall
+      spiderweb query "machine learning" --expand --verbose
+      
+      \b
+      # Query with HyDE expansion and custom number of expansions
+      spiderweb query "machine learning" --expand --expand-strategy hyde --expand-num 5
     """
     asyncio.run(
         _query(
@@ -109,6 +151,11 @@ def query_cmd(
             context_after,
             context_mode,
             semantic_guide,
+            expand,
+            expand_strategy,
+            expand_prompt,
+            expand_num,
+            verbose,
         )
     )
 
@@ -123,6 +170,11 @@ async def _query(
     context_after: int | None,
     context_mode: str | None,
     semantic_guide: str | None,
+    expand: bool,
+    expand_strategy: str,
+    expand_prompt: str | None,
+    expand_num: int,
+    verbose: bool,
 ):
     """Async query implementation."""
     # Create LLM client
@@ -148,11 +200,28 @@ async def _query(
             semantic_guide=semantic_guide,
         )
 
+    # Build query expansion config if enabled
+    query_expansion = None
+    if expand:
+        query_expansion = QueryExpansionConfig(
+            enabled=True,
+            strategy=expand_strategy,
+            custom_prompt=expand_prompt,
+            num_expansions=expand_num,
+        )
+        if verbose:
+            console.print(f"[cyan]Query expansion enabled: {expand_strategy} strategy with {expand_num} expansions[/cyan]")
+
     try:
         console.print(f"[cyan]Querying: {query_text}[/cyan]\n")
 
         with console.status("[bold cyan]Searching..."):
-            result = await web.query(query_text, top_k=top_k, context_window=context_window)
+            result = await web.query(
+                query_text,
+                top_k=top_k,
+                context_window=context_window,
+                query_expansion=query_expansion,
+            )
 
         if not result.chunks:
             console.print("[yellow]No results found[/yellow]")
@@ -160,10 +229,21 @@ async def _query(
 
         console.print(f"[green]Found {result.total_results} results in {result.execution_time_seconds:.3f}s[/green]\n")
 
+        # Show expanded queries if verbose and expansion was used
+        if verbose and result.expanded_queries:
+            console.print("[bold cyan]Expanded Queries:[/bold cyan]")
+            for idx, exp_query in enumerate(result.expanded_queries, 1):
+                console.print(f"  {idx}. {exp_query}")
+            console.print()
+
         # Display results
         for idx, (chunk, score) in enumerate(zip(result.chunks, result.scores, strict=True), 1):
             # Format score
             score_str = f" (score: {score:.3f})" if show_scores else ""
+            
+            # Add RRF score if available
+            if verbose and result.rrf_scores and idx <= len(result.rrf_scores):
+                score_str += f" [RRF: {result.rrf_scores[idx-1]:.4f}]"
 
             # Create panel content
             content = chunk["content"]
