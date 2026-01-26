@@ -10,7 +10,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class ChunkType(str, Enum):
@@ -61,8 +61,8 @@ class DocumentMetadata(BaseModel):
         description="Additional custom metadata",
     )
 
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "source": "/path/to/document.pdf",
                 "file_type": "pdf",
@@ -74,6 +74,7 @@ class DocumentMetadata(BaseModel):
                 "extra": {"author": "John Doe", "department": "Engineering"},
             }
         }
+    )
 
 
 class ChunkMetadata(BaseModel):
@@ -117,8 +118,8 @@ class ChunkMetadata(BaseModel):
         description="Additional custom metadata",
     )
 
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "document_id": "doc_123",
                 "chunk_index": 0,
@@ -131,6 +132,7 @@ class ChunkMetadata(BaseModel):
                 "extra": {},
             }
         }
+    )
 
 
 class Chunk(BaseModel):
@@ -211,8 +213,8 @@ class Chunk(BaseModel):
         """
         return len(self.content.split())
 
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "id": "chunk_abc123",
                 "content": "This is a sample chunk of text from a document.",
@@ -227,6 +229,7 @@ class Chunk(BaseModel):
                 "children_ids": [],
             }
         }
+    )
 
 
 class Document(BaseModel):
@@ -301,8 +304,8 @@ class Document(BaseModel):
         """
         return [chunk for chunk in self.chunks if chunk.embedding is not None]
 
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "id": "doc_123",
                 "raw_content": "This is the raw extracted content...",
@@ -319,3 +322,4 @@ class Document(BaseModel):
                 },
             }
         }
+    )

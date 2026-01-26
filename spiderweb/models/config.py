@@ -62,8 +62,8 @@ class ChunkerConfig(BaseModel):
         description="Maximum hierarchy depth for hierarchical chunking",
     )
 
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "strategy": "semantic",
                 "max_chunk_size": 1000,
@@ -73,6 +73,7 @@ class ChunkerConfig(BaseModel):
                 "semantic_threshold": 0.7,
             }
         }
+    )
 
 
 class ExtractorConfig(BaseModel):
@@ -114,8 +115,8 @@ class ExtractorConfig(BaseModel):
         description="Document language (None for auto-detect)",
     )
 
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "primary_method": "markitdown",
                 "enable_cross_extraction": True,
@@ -124,6 +125,7 @@ class ExtractorConfig(BaseModel):
                 "extract_metadata": True,
             }
         }
+    )
 
 
 class ValidatorConfig(BaseModel):
@@ -177,8 +179,8 @@ class ValidatorConfig(BaseModel):
         description="Minimum information density score (0-1)",
     )
 
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "enable_validation": True,
                 "min_quality_score": 0.5,
@@ -187,6 +189,7 @@ class ValidatorConfig(BaseModel):
                 "enable_llm_validation": False,
             }
         }
+    )
 
 
 class BatchConfig(BaseModel):
@@ -227,8 +230,8 @@ class BatchConfig(BaseModel):
         description="Path to save checkpoints",
     )
 
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "max_concurrent_extractions": 5,
                 "max_concurrent_embeddings": 10,
@@ -236,6 +239,7 @@ class BatchConfig(BaseModel):
                 "continue_on_error": True,
             }
         }
+    )
 
 
 class VectorStoreConfig(BaseModel):
@@ -282,8 +286,8 @@ class VectorStoreConfig(BaseModel):
         description="Additional provider-specific configuration",
     )
 
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "provider": "qdrant",
                 "host": "localhost",
@@ -293,6 +297,7 @@ class VectorStoreConfig(BaseModel):
                 "distance_metric": "cosine",
             }
         }
+    )
 
 
 class ContextWindowConfig(BaseModel):

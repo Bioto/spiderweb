@@ -57,14 +57,12 @@ class TestCrawlResult:
 class TestHttpCrawler:
     """Tests for HttpCrawler."""
     
-    @pytest.mark.asyncio
     async def test_http_crawler_init(self):
         """Test HttpCrawler initialization."""
         crawler = HttpCrawler()
         assert crawler._session is None
         await crawler.close()
     
-    @pytest.mark.asyncio
     async def test_extract_links(self):
         """Test link extraction from HTML."""
         crawler = HttpCrawler()
@@ -89,7 +87,6 @@ class TestHttpCrawler:
         
         await crawler.close()
     
-    @pytest.mark.asyncio
     async def test_should_follow_link(self):
         """Test link following logic."""
         crawler = HttpCrawler()
@@ -115,7 +112,6 @@ class TestHttpCrawler:
 class TestCrawlExtractor:
     """Tests for CrawlExtractor."""
     
-    @pytest.mark.asyncio
     async def test_crawl_extractor_init(self):
         """Test CrawlExtractor initialization."""
         llm_client = MagicMock()
@@ -200,7 +196,6 @@ class TestCrawlExtractor:
         assert isinstance(result, Product)
         assert result.name == "Widget"
     
-    @pytest.mark.asyncio
     async def test_extract_with_schema(self):
         """Test extraction with Pydantic schema."""
         class Product(BaseModel):
@@ -233,7 +228,6 @@ class TestCrawlExtractor:
 class TestWebLoader:
     """Tests for WebLoader."""
     
-    @pytest.mark.asyncio
     async def test_web_loader_init(self):
         """Test WebLoader initialization."""
         loader = WebLoader()
@@ -242,7 +236,6 @@ class TestWebLoader:
         assert loader.crawler_config is not None
         assert loader.extraction_config is not None
     
-    @pytest.mark.asyncio
     async def test_web_loader_with_http_provider(self):
         """Test WebLoader with HTTP crawler."""
         config = CrawlerConfig(provider="http")
@@ -250,7 +243,6 @@ class TestWebLoader:
         
         assert isinstance(loader.crawler, HttpCrawler)
     
-    @pytest.mark.asyncio
     async def test_crawl_result_to_document(self):
         """Test converting CrawlResult to Document."""
         loader = WebLoader()

@@ -22,3 +22,4 @@ def get_version() -> str:
         return str(data.get("project", {}).get("version", "0.0.0"))
 
 
+

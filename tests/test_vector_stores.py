@@ -25,7 +25,6 @@ def _make_chunk(
     return chunk
 
 
-@pytest.mark.asyncio
 async def test_memory_vector_store_upsert_requires_embeddings():
     store = MemoryVectorStore()
     chunk = _make_chunk("Hello", idx=0, embedding=None)
@@ -34,7 +33,6 @@ async def test_memory_vector_store_upsert_requires_embeddings():
         await store.upsert([chunk])
 
 
-@pytest.mark.asyncio
 async def test_memory_vector_store_query_orders_by_similarity():
     store = MemoryVectorStore()
     chunk_a = _make_chunk("A", idx=0, embedding=[1.0, 0.0])
@@ -46,5 +44,6 @@ async def test_memory_vector_store_query_orders_by_similarity():
     assert len(results) == 2
     assert results[0][0].id == chunk_a.id
     assert results[0][1] == pytest.approx(1.0, abs=1e-6)
+
 
 

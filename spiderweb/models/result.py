@@ -55,8 +55,8 @@ class IngestionResult(BaseModel):
         description="List of warnings during processing",
     )
 
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "document": {
                     "id": "doc_123",
@@ -75,6 +75,7 @@ class IngestionResult(BaseModel):
                 "warnings": ["Low quality chunk at index 5"],
             }
         }
+    )
 
 
 class BatchIngestionResult(BaseModel):
@@ -128,8 +129,8 @@ class BatchIngestionResult(BaseModel):
         description="When batch processing completed",
     )
 
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "total_documents": 100,
                 "successful_documents": 98,
@@ -143,6 +144,7 @@ class BatchIngestionResult(BaseModel):
                 "errors": {"doc1.pdf": ["Extraction failed"], "doc2.pdf": ["Invalid format"]},
             }
         }
+    )
 
 
 class ValidationResult(BaseModel):
@@ -191,8 +193,8 @@ class ValidationResult(BaseModel):
         description="Recommendations for improving chunk quality",
     )
 
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "chunk_id": "chunk_123",
                 "passed": True,
@@ -205,6 +207,7 @@ class ValidationResult(BaseModel):
                 "recommendations": [],
             }
         }
+    )
 
 
 class QueryResult(BaseModel):

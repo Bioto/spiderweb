@@ -92,7 +92,7 @@ dev = [
 
 # All optional features
 all = [
-    "spiderweb[pdf,office,ocr]",
+    "spiderwebllm[pdf,office,ocr]",
 ]
 
 [project.urls]

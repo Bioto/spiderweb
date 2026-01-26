@@ -169,7 +169,6 @@ def test_custom_prompt_override():
 # Integration Tests (with mocked LLM)
 
 
-@pytest.mark.asyncio
 async def test_query_with_multi_query_expansion():
     """Full query flow with multi-query strategy."""
     # Mock LLM client
@@ -205,7 +204,6 @@ Explain ML concepts"""
     assert "machine learning" in expanded[1].lower() or "ml" in expanded[1].lower()
 
 
-@pytest.mark.asyncio
 async def test_query_with_hyde_expansion():
     """Full query flow with HyDE strategy."""
     # Mock LLM client
@@ -233,7 +231,6 @@ async def test_query_with_hyde_expansion():
     assert "artificial intelligence" in expanded[0].lower()
 
 
-@pytest.mark.asyncio
 async def test_query_expansion_disabled_by_default():
     """Expansion doesn't run unless explicitly enabled."""
     config = QueryExpansionConfig()  # defaults to enabled=False
@@ -241,7 +238,6 @@ async def test_query_expansion_disabled_by_default():
     assert config.enabled is False
 
 
-@pytest.mark.asyncio
 async def test_query_expansion_includes_original():
     """Original query is included when include_original=True."""
     mock_llm = AsyncMock()
@@ -263,7 +259,6 @@ async def test_query_expansion_includes_original():
     assert expanded[0] == "Original query"
 
 
-@pytest.mark.asyncio
 async def test_query_expansion_excludes_original():
     """Original query excluded when include_original=False."""
     mock_llm = AsyncMock()
@@ -285,7 +280,6 @@ async def test_query_expansion_excludes_original():
     assert expanded[0] != "Original query"
 
 
-@pytest.mark.asyncio
 async def test_query_result_contains_expansion_metadata():
     """Result includes expanded_queries and expansion_strategy."""
     # Create a result with expansion metadata
@@ -307,7 +301,6 @@ async def test_query_result_contains_expansion_metadata():
     assert len(result.rrf_scores) == 3
 
 
-@pytest.mark.asyncio
 async def test_query_expansion_with_context_window():
     """Expansion works correctly combined with context retrieval."""
     # This test verifies that both features can be enabled simultaneously
@@ -324,7 +317,6 @@ async def test_query_expansion_with_context_window():
 # Edge Cases
 
 
-@pytest.mark.asyncio
 async def test_expansion_with_empty_query():
     """Handles empty/whitespace queries."""
     mock_llm = AsyncMock()
@@ -339,7 +331,6 @@ async def test_expansion_with_empty_query():
         await expander.expand("   ")
 
 
-@pytest.mark.asyncio
 async def test_expansion_llm_error_fallback():
     """Falls back to original query if LLM expansion fails."""
     mock_llm = AsyncMock()
@@ -357,7 +348,6 @@ async def test_expansion_llm_error_fallback():
     assert expanded[0] == "Test query"
 
 
-@pytest.mark.asyncio
 async def test_expansion_with_special_characters():
     """Queries with quotes, unicode, etc. handled correctly."""
     mock_llm = AsyncMock()
@@ -378,7 +368,6 @@ async def test_expansion_with_special_characters():
     assert expanded[0] == special_query
 
 
-@pytest.mark.asyncio
 async def test_multi_query_with_numbered_output():
     """Handles LLM output with numbering/bullets."""
     mock_llm = AsyncMock()
@@ -406,7 +395,6 @@ async def test_multi_query_with_numbered_output():
     assert "machine learning" in expanded[0].lower()
 
 
-@pytest.mark.asyncio
 async def test_multi_query_with_bullet_points():
     """Handles LLM output with bullet points."""
     mock_llm = AsyncMock()
@@ -436,7 +424,6 @@ async def test_multi_query_with_bullet_points():
         assert not query.startswith("•")
 
 
-@pytest.mark.asyncio
 async def test_rrf_k_parameter_effect():
     """Test that different RRF k values affect scoring."""
     chunk1 = MagicMock(spec=Chunk)
@@ -453,7 +440,6 @@ async def test_rrf_k_parameter_effect():
     assert rrf_low_k[0][1] > rrf_high_k[0][1]
 
 
-@pytest.mark.asyncio
 async def test_hyde_multiple_expansions():
     """HyDE can generate multiple hypothetical documents."""
     mock_llm = AsyncMock()

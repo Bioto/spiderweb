@@ -99,3 +99,4 @@ class ProgressiveQueryResult(BaseModel):
     cache_hit: bool = Field(False, description="Whether results came from full cache")
 
 
+

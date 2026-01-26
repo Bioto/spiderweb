@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from colorlog import ColoredFormatter
-from pythonjsonlogger import jsonlogger
+from pythonjsonlogger import json as jsonlogger
 
 
 def setup_logging(

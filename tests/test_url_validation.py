@@ -34,3 +34,4 @@ def test_validate_http_url_rejects_local_targets():
         validate_http_url("http://10.0.0.1")
 
 
+

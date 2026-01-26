@@ -27,7 +27,6 @@ def _make_chunk(
     return chunk
 
 
-@pytest.mark.asyncio
 async def test_quality_validator_fails_low_information_density():
     validator = QualityValidator(min_score=0.3, min_information_density=0.8)
     chunk = _make_chunk("-----.....-----")  # near-zero alnum density
@@ -39,7 +38,6 @@ async def test_quality_validator_fails_low_information_density():
     assert result.information_density < 0.8
 
 
-@pytest.mark.asyncio
 async def test_dedup_validator_detects_exact_duplicates_via_hash():
     validator = DedupValidator(use_content_hash=True, use_embedding_similarity=False)
 
@@ -54,7 +52,6 @@ async def test_dedup_validator_detects_exact_duplicates_via_hash():
     assert "Exact duplicate" in result.issues
 
 
-@pytest.mark.asyncio
 async def test_dedup_validator_detects_near_duplicates_via_embedding():
     validator = DedupValidator(use_content_hash=False, use_embedding_similarity=True, threshold=0.95)
 
@@ -68,7 +65,6 @@ async def test_dedup_validator_detects_near_duplicates_via_embedding():
     assert result.duplicate_of == chunk1.id
 
 
-@pytest.mark.asyncio
 async def test_validation_pipeline_sets_chunk_validation_scores():
     pipeline = ValidationPipeline(llm_client=None)
     chunk = _make_chunk("-----.....-----")
@@ -77,5 +73,6 @@ async def test_validation_pipeline_sets_chunk_validation_scores():
     assert len(results) == 1
     assert "quality" in chunk.validation_scores
     assert "information_density" in chunk.validation_scores
+
 
 

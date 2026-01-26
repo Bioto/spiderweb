@@ -4469,7 +4469,7 @@ wheels = [
 ]
 
 [[package]]
-name = "spiderweb"
+name = "spiderwebllm"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
@@ -4551,7 +4551,7 @@ requires-dist = [
     { name = "rich", specifier = ">=14.2.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.14.10" },
     { name = "spacy", specifier = ">=3.8.0" },
-    { name = "spiderweb", extras = ["pdf", "office", "ocr"], marker = "extra == 'all'" },
+    { name = "spiderwebllm", extras = ["pdf", "office", "ocr"], marker = "extra == 'all'" },
     { name = "tenacity", specifier = ">=9.0.0" },
 ]
 provides-extras = ["pdf", "office", "ocr", "dev", "all"]

@@ -301,3 +301,4 @@ class CrawlStorage:
         logger.info(f"Created index with {len(index_data['files'])} files")
         return index_file
 
+
