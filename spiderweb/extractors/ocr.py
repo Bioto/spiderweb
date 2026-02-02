@@ -6,7 +6,11 @@ For PDFs with broken text encoding or scanned documents.
 import io
 from pathlib import Path
 
-import fitz  # PyMuPDF
+# Use pymupdf package (PyMuPDF); avoid top-level "fitz" package which is not PyMuPDF
+try:
+    import pymupdf as _fitz
+except ImportError:
+    import fitz as _fitz  # type: ignore[import-untyped]
 import pytesseract
 from PIL import Image
 
@@ -72,8 +76,8 @@ class OCRExtractor:
 
         logger.info(f"Starting OCR extraction for {path.name}")
 
-        # Open PDF
-        doc = fitz.open(path)
+        # Open PDF (use pymupdf; avoid top-level "fitz" package which is not PyMuPDF)
+        doc = _fitz.open(path)
         total_pages = len(doc)
         pages_to_process = min(total_pages, self.max_pages) if self.max_pages else total_pages
 
@@ -126,15 +130,17 @@ class OCRExtractor:
             metadata=metadata,
         )
 
-    def supports(self, file_type: str) -> bool:
-        """Check if this extractor supports the file type.
+    def supports(self, file_path: str | Path) -> bool:
+        """Check if this extractor supports the given file.
 
         Args:
-            file_type: File extension (with or without dot)
+            file_path: Path to the file, or file extension (e.g. ".pdf" or "pdf")
 
         Returns:
-            True if file type is supported
+            True if this extractor can process the file (PDF only)
         """
-        # Handle both string and Path objects, and with/without dot
-        ft = str(file_type).lower().lstrip(".")
-        return ft == "pdf"
+        p = Path(file_path)
+        if p.suffix:
+            return p.suffix.lower() == ".pdf"
+        # Bare extension (e.g. ".pdf" or "pdf") — Path has no suffix
+        return str(file_path).lower().lstrip(".") == "pdf"

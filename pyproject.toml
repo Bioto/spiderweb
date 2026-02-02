@@ -58,7 +58,7 @@ dependencies = [
     # Web crawling
     "aiohttp>=3.9.0",
     "crawl4ai>=0.4.0",
-    "fitz>=0.0.1.dev2",
+    "pymupdf>=1.24.0",  # provides 'fitz' module (PyMuPDF); do not use PyPI package "fitz"
 ]
 
 [project.optional-dependencies]

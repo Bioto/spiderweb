@@ -335,12 +335,20 @@ class DocumentProcessor:
             warnings=[reason],
         )
 
-    async def process(self, file_path: str | Path, store_chunks: bool = True) -> IngestionResult:
+    async def process(
+        self,
+        file_path: str | Path,
+        store_chunks: bool = True,
+        document_id: str | None = None,
+    ) -> IngestionResult:
         """Process a single document through the full pipeline.
 
         Args:
             file_path: Path to the document
             store_chunks: Whether to store chunks in vector store
+            document_id: Optional custom document ID. If provided, this ID will be used
+                for the document and all its chunks. If not provided, the auto-generated
+                document ID from extraction will be used.
 
         Returns:
             Ingestion result with statistics
@@ -368,6 +376,11 @@ class DocumentProcessor:
             # 1. Load and extract
             logger.debug(f"Step 1/5: Extracting content from {extract_path.name}")
             document = await self.file_loader.load(extract_path)
+
+            # Override document ID if provided (allows external systems to control the ID)
+            if document_id:
+                document.id = document_id
+                logger.debug(f"Using custom document ID: {document_id}")
 
             # Hook: AFTER_EXTRACT
             ctx = await self.hooks.run(HookPoint.AFTER_EXTRACT, document, file_path=str(path))

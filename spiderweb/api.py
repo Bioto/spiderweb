@@ -166,11 +166,18 @@ class Spiderweb:
             )
         return self._batch_processor
 
-    async def ingest(self, file_path: str | Path) -> IngestionResult:
+    async def ingest(
+        self,
+        file_path: str | Path,
+        document_id: str | None = None,
+    ) -> IngestionResult:
         """Ingest a single document.
 
         Args:
             file_path: Path to the document
+            document_id: Optional custom document ID. If provided, this ID will be used
+                for the document and all its chunks (useful for linking to external systems).
+                If not provided, a UUID will be auto-generated.
 
         Returns:
             Ingestion result with statistics
@@ -179,7 +186,7 @@ class Spiderweb:
             FileNotFoundError: If file doesn't exist
             ExtractionError: If extraction fails
         """
-        return await self.document_processor.process(file_path)
+        return await self.document_processor.process(file_path, document_id=document_id)
 
     async def ingest_directory(
         self,
@@ -202,6 +209,33 @@ class Spiderweb:
             recursive=recursive,
             show_progress=show_progress,
         )
+
+    async def delete_document(self, document_id: str) -> int:
+        """Delete a document and all its chunks from the vector store.
+
+        Args:
+            document_id: The document ID to delete
+
+        Returns:
+            Number of chunks deleted
+        """
+        deleted_count = await self.document_processor.vector_store.delete_by_document_id(document_id)
+        logger.info(f"Deleted document {document_id} with {deleted_count} chunks")
+        return deleted_count
+
+    async def get_document_chunks(self, document_id: str, limit: int = 1000) -> list:
+        """Get all chunks for a document from the vector store.
+
+        Args:
+            document_id: The document ID to get chunks for
+            limit: Maximum number of chunks to return
+
+        Returns:
+            List of Chunk objects sorted by chunk_index
+        """
+        chunks = await self.document_processor.vector_store.get_by_document_id(document_id, limit=limit)
+        logger.debug(f"Retrieved {len(chunks)} chunks for document {document_id}")
+        return chunks
 
     async def query(
         self,

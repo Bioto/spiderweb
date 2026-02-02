@@ -263,10 +263,19 @@ class QdrantVectorStore:
         query_filter = None
         if filter_dict:
             # Convert dict to Qdrant filter
-            # This is a simple implementation - can be extended for complex filters
+            # Supports both single values and lists (for "any of" matching)
             must_conditions = []
             for key, value in filter_dict.items():
-                must_conditions.append(qmodels.FieldCondition(key=key, match=qmodels.MatchValue(value=value)))
+                if isinstance(value, list):
+                    # Use MatchAny for list values (OR within the list)
+                    must_conditions.append(
+                        qmodels.FieldCondition(key=key, match=qmodels.MatchAny(any=value))
+                    )
+                else:
+                    # Use MatchValue for single values
+                    must_conditions.append(
+                        qmodels.FieldCondition(key=key, match=qmodels.MatchValue(value=value))
+                    )
 
             query_filter = qmodels.Filter(must=must_conditions)
 
@@ -304,6 +313,47 @@ class QdrantVectorStore:
 
         logger.debug(f"Deleted {len(chunk_ids)} chunks from Qdrant")
 
+    async def delete_by_document_id(self, document_id: str) -> int:
+        """Delete all chunks belonging to a document.
+
+        Args:
+            document_id: The document ID whose chunks should be deleted
+
+        Returns:
+            Number of chunks deleted (approximate)
+        """
+        await self.initialize()
+
+        # Use filter to delete all chunks with this document_id
+        delete_filter = qmodels.Filter(
+            must=[
+                qmodels.FieldCondition(
+                    key="document_id",
+                    match=qmodels.MatchValue(value=document_id),
+                )
+            ]
+        )
+
+        # Get count before delete (for logging)
+        scroll_result = await self.client.scroll(
+            collection_name=self.collection_name,
+            scroll_filter=delete_filter,
+            limit=1,
+            with_payload=False,
+            with_vectors=False,
+        )
+        # Note: scroll only returns first page, so count may be approximate for large sets
+
+        await self.client.delete(
+            collection_name=self.collection_name,
+            points_selector=qmodels.FilterSelector(filter=delete_filter),
+        )
+
+        deleted_count = len(scroll_result[0]) if scroll_result[0] else 0
+        logger.info(f"Deleted chunks for document {document_id} from Qdrant (at least {deleted_count})")
+
+        return deleted_count
+
     async def get(self, chunk_ids: list[str]) -> list[Chunk]:
         """Get chunks by ID.
 
@@ -340,6 +390,55 @@ class QdrantVectorStore:
 
         collection_info = await self.client.get_collection(self.collection_name)
         return collection_info.points_count
+
+    async def get_by_document_id(self, document_id: str, limit: int = 1000) -> list[Chunk]:
+        """Retrieve all chunks belonging to a document.
+
+        Args:
+            document_id: The document ID to get chunks for
+            limit: Maximum number of chunks to return (default 1000)
+
+        Returns:
+            List of chunks sorted by chunk_index
+        """
+        await self.initialize()
+
+        # Use scroll with filter to get all chunks for document
+        doc_filter = qmodels.Filter(
+            must=[
+                qmodels.FieldCondition(
+                    key="document_id",
+                    match=qmodels.MatchValue(value=document_id),
+                )
+            ]
+        )
+
+        all_chunks = []
+        offset = None
+
+        while True:
+            points, next_offset = await self.client.scroll(
+                collection_name=self.collection_name,
+                scroll_filter=doc_filter,
+                limit=min(100, limit - len(all_chunks)),
+                offset=offset,
+                with_vectors=False,  # Don't need embeddings for display
+                with_payload=True,
+            )
+
+            for point in points:
+                chunk = self._payload_to_chunk(point.payload, embedding=None)
+                all_chunks.append(chunk)
+
+            if next_offset is None or len(all_chunks) >= limit:
+                break
+            offset = next_offset
+
+        # Sort by chunk_index
+        all_chunks.sort(key=lambda c: c.metadata.chunk_index)
+
+        logger.debug(f"Retrieved {len(all_chunks)} chunks for document {document_id}")
+        return all_chunks
 
     async def clear(self) -> None:
         """Clear all chunks."""

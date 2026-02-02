@@ -53,6 +53,17 @@ class VectorStore(Protocol):
         """
         ...
 
+    async def delete_by_document_id(self, document_id: str) -> int:
+        """Delete all chunks belonging to a document.
+
+        Args:
+            document_id: The document ID whose chunks should be deleted
+
+        Returns:
+            Number of chunks deleted
+        """
+        ...
+
     async def get(self, chunk_ids: list[str]) -> list[Chunk]:
         """Retrieve chunks by ID.
 

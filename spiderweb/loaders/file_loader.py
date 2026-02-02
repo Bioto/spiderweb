@@ -55,7 +55,8 @@ class FileLoader:
         logger.info(f"Loading file: {path.name}")
 
         # Check if extractor supports this file
-        if not self.extractor.supports(path.suffix):
+        # Pass the full path, not just suffix, as extractors expect a file path
+        if not self.extractor.supports(path):
             raise ValueError(f"Extractor {type(self.extractor).__name__} does not support {path.suffix}")
 
         # Extract content

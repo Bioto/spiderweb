@@ -93,6 +93,25 @@ class MemoryVectorStore:
 
         logger.debug(f"Deleted {deleted} chunks")
 
+    async def delete_by_document_id(self, document_id: str) -> int:
+        """Delete all chunks belonging to a document.
+
+        Args:
+            document_id: The document ID whose chunks should be deleted
+
+        Returns:
+            Number of chunks deleted
+        """
+        to_delete = [
+            chunk_id for chunk_id, chunk in self._chunks.items()
+            if chunk.metadata.document_id == document_id
+        ]
+        for chunk_id in to_delete:
+            del self._chunks[chunk_id]
+
+        logger.debug(f"Deleted {len(to_delete)} chunks for document {document_id}")
+        return len(to_delete)
+
     async def get(self, chunk_ids: list[str]) -> list[Chunk]:
         """Get chunks by ID.
 
