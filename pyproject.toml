@@ -83,6 +83,17 @@ ocr = [
     "pillow>=10.0.0",
 ]
 
+# MCP server
+mcp = [
+    "mcp>=1.0.0",
+]
+
+# REST API server
+api = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
+]
+
 # Development dependencies
 dev = [
     "pytest>=8.0.0",
@@ -94,7 +105,7 @@ dev = [
 
 # All optional features
 all = [
-    "spiderwebllm[pdf,office,ocr]",
+    "spiderwebllm[pdf,office,ocr,mcp,api]",
 ]
 
 [project.urls]

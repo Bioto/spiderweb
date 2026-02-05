@@ -133,6 +133,99 @@ spiderweb crawl https://example.com --ingest --store qdrant://localhost:6333/doc
 spiderweb query "What is X?" --store qdrant://localhost:6333/docs --top-k 5
 ```
 
+## Optional: MCP Server
+
+Spiderweb can expose its crawling and search tools via the [Model Context Protocol (MCP)](https://modelcontextprotocol.io/), allowing AI clients like Cursor, Claude Desktop, or the MCP Inspector to invoke them.
+
+### Installation
+
+```bash
+pip install "spiderweb[mcp]"
+```
+
+### Running the Server
+
+**For IDE integration (stdio):**
+```bash
+spiderweb mcp
+```
+
+**For testing with MCP Inspector (HTTP):**
+```bash
+spiderweb mcp --transport streamable-http --port 8000
+```
+
+Then connect with: `npx -y @modelcontextprotocol/inspector` → `http://localhost:8000/mcp`
+
+### Available Tools
+
+- **crawl_url**: Crawl a single URL
+  - Args: `url`, optional `save_to`, `save_format`, `vector_store_url`
+  - Returns: `{url, success, title, markdown_preview, links_count, error}`
+
+- **crawl_urls**: Crawl multiple URLs
+  - Args: `urls` (list), optional `save_to`, `save_format`, `vector_store_url`
+  - Returns: `{results: [...]}` (list of crawl_url-style results)
+
+- **search_and_crawl**: Search the web and crawl results
+  - Args: `query`, optional `max_rounds`, `crawl_per_round`, `save_to`, `save_trace_to`, `vector_store_url`
+  - Returns: `{query, rounds_count, urls_crawled, urls_filtered, summaries}`
+
+### Adding to Cursor
+
+In Cursor settings, add an MCP server:
+- **Command**: `spiderweb mcp`
+- **Transport**: `stdio`
+
+The tools will then be available to the AI assistant.
+
+## Optional: REST API Server
+
+Spiderweb can expose its crawling and search capabilities via a simple REST API using FastAPI.
+
+### Installation
+
+```bash
+pip install "spiderweb[api]"
+```
+
+### Running the Server
+
+```bash
+# Start on default port (8000)
+spiderweb api
+
+# Custom host/port
+spiderweb api --host 0.0.0.0 --port 8080
+
+# With auto-reload (development)
+spiderweb api --reload
+```
+
+### API Endpoints
+
+- **POST /crawl** - Crawl a single URL
+- **POST /crawl/batch** - Crawl multiple URLs
+- **POST /search** - Search the web and crawl results
+- **GET /health** - Health check
+- **GET /docs** - Interactive API documentation (Swagger UI)
+
+### Example Usage
+
+```bash
+# Crawl a URL
+curl -X POST "http://localhost:8000/crawl" \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://example.com", "save_format": "markdown"}'
+
+# Search and crawl
+curl -X POST "http://localhost:8000/search" \
+  -H "Content-Type: application/json" \
+  -d '{"query": "python web scraping", "max_rounds": 2, "crawl_per_round": 5}'
+```
+
+Visit `http://localhost:8000/docs` for interactive API documentation.
+
 ## Docs (short, useful, and not trying to be a novel)
 
 - **Crawling**: [docs/CRAWL_FEATURE.md](docs/CRAWL_FEATURE.md)
