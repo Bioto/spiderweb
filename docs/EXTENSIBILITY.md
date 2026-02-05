@@ -1,6 +1,8 @@
 # Extensibility Guide
 
-Spiderweb provides a flexible extensibility system that allows you to customize the document processing pipeline without modifying the core library. This guide covers the two main extension mechanisms: **Component Registries** and **Hooks**.
+> Need to do something weird? We've got you covered.
+
+Spiderweb is designed to get out of your way when you need to customize things. This guide covers the two main extension mechanisms: **Component Registries** (plug in your own chunkers, crawlers, extractors) and **Hooks** (intercept data at any pipeline stage).
 
 ## Overview
 

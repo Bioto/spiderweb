@@ -1,6 +1,8 @@
 # Configuration Reference
 
-Complete reference for all Spiderweb configuration options.
+> All the knobs and dials, documented.
+
+Complete reference for all Spiderweb configuration options. Sensible defaults are provided, but when you need to customize, here's everything you can tweak.
 
 ## Overview
 

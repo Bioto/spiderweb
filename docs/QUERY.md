@@ -1,6 +1,8 @@
 # Query Features
 
-Spiderweb provides advanced query capabilities beyond basic vector search, including **query expansion** for improved recall and **context window retrieval** for understanding surrounding content.
+> Because "simple vector search" often isn't enough.
+
+Spiderweb provides advanced query capabilities beyond basic vector search. Use **query expansion** when simple queries miss relevant content, and **context windows** when you need the surrounding paragraphs to make sense of a match.
 
 ## Overview
 

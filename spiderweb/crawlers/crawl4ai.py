@@ -120,6 +120,48 @@ class Crawl4AICrawler:
         # No patterns specified, follow all non-excluded links
         return True
     
+    def _build_run_config(self, config: CrawlerConfig) -> Any:
+        """Build crawl4ai CrawlerRunConfig from Spiderweb CrawlerConfig.
+        
+        Maps existing CrawlerConfig fields to crawl4ai's CrawlerRunConfig,
+        then merges extra_config to allow power users to set any CrawlerRunConfig
+        field. See crawl4ai's CrawlerRunConfig for full list of available options.
+        
+        Args:
+            config: Spiderweb CrawlerConfig
+            
+        Returns:
+            crawl4ai CrawlerRunConfig instance
+        """
+        try:
+            from crawl4ai import CrawlerRunConfig, CacheMode
+        except ImportError:
+            raise ImportError(
+                "crawl4ai is not installed. Install it with: pip install crawl4ai"
+            )
+        
+        # Build base config dict from CrawlerConfig fields
+        run_config_dict: dict[str, Any] = {
+            # Map timeout_seconds (seconds) to page_timeout (milliseconds)
+            "page_timeout": config.timeout_seconds * 1000,
+            # Map respect_robots_txt to check_robots_txt
+            "check_robots_txt": config.respect_robots_txt,
+            # Map wait_for_js to js_code (current behavior: scroll when JS enabled)
+            "js_code": ["window.scrollTo(0, document.body.scrollHeight);"] if config.wait_for_js else None,
+            # Preserve current behavior: bypass cache
+            "cache_mode": CacheMode.BYPASS,
+        }
+        
+        # Map user_agent only if provided (crawl4ai's run config has user_agent field)
+        if config.user_agent:
+            run_config_dict["user_agent"] = config.user_agent
+        
+        # Merge extra_config (allows power users to override or add any CrawlerRunConfig field)
+        run_config_dict.update(config.extra_config)
+        
+        # Build and return CrawlerRunConfig
+        return CrawlerRunConfig.from_kwargs(run_config_dict)
+    
     async def crawl(self, url: str, config: CrawlerConfig | None = None) -> CrawlResult:
         """Fetch content from a single URL with JavaScript rendering.
         
@@ -141,25 +183,11 @@ class Crawl4AICrawler:
         try:
             logger.info(f"Crawling URL with Crawl4AI: {url}")
             
-            # Prepare crawl4ai parameters
-            crawl_params: dict[str, Any] = {
-                "url": url,
-                "bypass_cache": True,
-            }
+            # Build crawl4ai run config from Spiderweb config
+            run_config = self._build_run_config(config)
             
-            # Add wait_for option if JS rendering needed
-            if config.wait_for_js:
-                crawl_params["js_code"] = ["window.scrollTo(0, document.body.scrollHeight);"]
-            
-            # Add custom headers if user agent specified
-            if config.user_agent:
-                crawl_params["headers"] = {"User-Agent": config.user_agent}
-            
-            # Merge extra config
-            crawl_params.update(config.extra_config)
-            
-            # Perform the crawl
-            result = await crawler.arun(**crawl_params)
+            # Perform the crawl with proper CrawlerRunConfig
+            result = await crawler.arun(url=url, config=run_config)
             
             # Extract content
             content = result.html or ""

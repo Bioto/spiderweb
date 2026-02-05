@@ -187,7 +187,7 @@ class CrawlStorage:
             data = {
                 "id": document.id,
                 "source": document.metadata.source,
-                "metadata": document.metadata.model_dump(),
+                "metadata": document.metadata.model_dump(mode="json"),
                 "raw_content": document.raw_content if format == "all" else None,
                 "markdown_content": document.markdown_content,
             }
@@ -197,7 +197,7 @@ class CrawlStorage:
                     {
                         "id": chunk.id,
                         "content": chunk.content,
-                        "metadata": chunk.metadata.model_dump(),
+                        "metadata": chunk.metadata.model_dump(mode="json"),
                         "has_embedding": chunk.embedding is not None,
                         "validation_scores": chunk.validation_scores,
                     }

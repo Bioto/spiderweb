@@ -1,6 +1,8 @@
 # Chunking Strategies
 
-Spiderweb provides four built-in chunking strategies, each optimized for different document types and use cases.
+> One size fits nobody. Pick the strategy that matches your documents.
+
+Spiderweb provides four built-in chunking strategies, each optimized for different document types and use cases. Don't know which one to use? Start with `hierarchical` and experiment from there.
 
 ## Strategy Comparison
 

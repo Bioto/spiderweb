@@ -1,6 +1,8 @@
 # Local File Storage for Crawled Data
 
-Spiderweb now supports saving crawled content to local files in addition to (or instead of) vector storage!
+> Because sometimes you just want files on disk, not everything in a database.
+
+Spiderweb supports saving crawled content to local files in addition to (or instead of) vector storage. Keep backups, build archives, process with your own scripts—whatever you need.
 
 ## Quick Start
 

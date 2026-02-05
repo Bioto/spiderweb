@@ -1,6 +1,8 @@
 # Progressive RAG
 
-Progressive RAG is a lazy-loading document processing strategy that creates lightweight page summaries first and fully processes pages on-demand as they're queried. This dramatically reduces initial ingestion time for large documents.
+> Why process 500 pages when you only ever query 20 of them?
+
+Progressive RAG is a lazy-loading strategy that creates lightweight page summaries first and fully processes pages on-demand as they're queried. Perfect for massive documents where you'd rather not wait an hour for initial ingestion.
 
 ## Overview
 

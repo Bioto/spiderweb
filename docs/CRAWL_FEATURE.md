@@ -1,6 +1,8 @@
 # Web Crawling Feature
 
-The Spiderweb web crawling feature provides a powerful, extensible system for fetching and processing web content with intelligent LLM-powered extraction capabilities.
+> Fetch websites, extract the good stuff, skip the cruft.
+
+The web crawling feature provides a powerful system for fetching and processing web content. Use simple HTTP for static sites, or Playwright-backed rendering for the JavaScript-heavy ones. Add LLM-powered extraction to pull structured data with Pydantic schemas.
 
 ## Overview
 
@@ -394,16 +396,6 @@ config = CrawlerConfig(
     follow_patterns=[],  # No pattern matching
 )
 ```
-
-## Future Enhancements
-
-- [ ] Sitemap parsing for smarter crawling
-- [ ] Browser automation backend (Playwright/Selenium)
-- [ ] JavaScript execution and interaction
-- [ ] Form submission support
-- [ ] Authentication handling
-- [ ] Distributed crawling
-- [ ] Incremental crawling (only fetch changed content)
 
 ## Related Documentation
 

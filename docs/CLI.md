@@ -1,6 +1,8 @@
 # CLI Reference
 
-Spiderweb provides a command-line interface for common document processing and RAG tasks.
+> For when you just want to get things done from the terminal.
+
+Spiderweb provides a command-line interface for common document processing and RAG tasks. Everything you can do in Python, you can do from the command line.
 
 ## Installation
 

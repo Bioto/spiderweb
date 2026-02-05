@@ -103,9 +103,17 @@ ifndef PATH
 endif
 	docker-compose exec spiderweb spiderweb ingest $(PATH) --store qdrant://qdrant:6333/docs $(ARGS)
 
-# Run tests
+# Run tests (in Docker)
 test:
 	docker-compose exec spiderweb pytest tests/ -v
+
+# Run tests locally (without Docker)
+test-local:
+	uv run pytest tests/ -v
+
+# Run tests with coverage
+test-cov:
+	uv run pytest tests/ -v --cov=spiderweb --cov-report=term-missing
 
 # Clean up containers and volumes
 clean:

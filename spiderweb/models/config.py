@@ -540,7 +540,12 @@ class CrawlerConfig(BaseModel):
     )
     extra_config: dict[str, Any] = Field(
         default_factory=dict,
-        description="Additional provider-specific configuration",
+        description=(
+            "Additional provider-specific configuration. "
+            "For crawl4ai provider, keys are passed through to crawl4ai's CrawlerRunConfig "
+            "(e.g. page_timeout, check_robots_txt, js_code, wait_for, css_selector, screenshot, "
+            "exclude_external_links, etc.). See crawl4ai documentation for full CrawlerRunConfig options."
+        ),
     )
     
     # Crawl relevance filtering
