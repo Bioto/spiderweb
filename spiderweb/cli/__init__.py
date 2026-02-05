@@ -11,6 +11,7 @@ from spiderweb.cli.commands.crawl import crawl_cmd
 from spiderweb.cli.commands.ingest import ingest_cmd
 from spiderweb.cli.commands.progressive_query import progressive_query_cmd
 from spiderweb.cli.commands.query import query_cmd
+from spiderweb.cli.commands.search import search_cmd
 from spiderweb._version import get_version
 
 
@@ -30,6 +31,7 @@ cli.add_command(crawl_cmd)
 cli.add_command(ingest_cmd)
 cli.add_command(query_cmd)
 cli.add_command(progressive_query_cmd)
+cli.add_command(search_cmd)
 
 
 if __name__ == "__main__":

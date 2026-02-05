@@ -65,6 +65,8 @@ from spiderweb.models.config import (
     CrawlExtractionConfig,
     CrawlerConfig,
     QueryExpansionConfig,
+    SearchDepthConfig,
+    SearchProviderConfig,
     ValidatorConfig,
     VectorStoreConfig,
 )
@@ -73,7 +75,9 @@ from spiderweb.registry import (
     chunker_registry,
     crawler_registry,
     extractor_registry,
+    search_provider_registry,
 )
+from spiderweb.search.base import SearchProvider, SearchResult, SearchResultBatch
 
 __all__ = [
     # Main API
@@ -99,11 +103,18 @@ __all__ = [
     "QueryExpansionConfig",
     "CrawlerConfig",
     "CrawlExtractionConfig",
+    "SearchProviderConfig",
+    "SearchDepthConfig",
+    # Search
+    "SearchProvider",
+    "SearchResult",
+    "SearchResultBatch",
     # Extensibility - Registries
     "ComponentRegistry",
     "chunker_registry",
     "crawler_registry",
     "extractor_registry",
+    "search_provider_registry",
     # Extensibility - Hooks
     "hooks",
     "HookPoint",

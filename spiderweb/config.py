@@ -193,6 +193,79 @@ class SpiderwebSettings(BaseSettings):
         description="Enable document extraction caching",
     )
 
+    # Search settings
+    default_search_provider: str = Field(
+        default="duckduckgo",
+        description="Default search provider backend",
+    )
+    default_search_limit: int = Field(
+        default=10,
+        ge=1,
+        le=100,
+        description="Default maximum number of search results per round",
+    )
+
+    # Crawler settings
+    default_crawler_provider: str = Field(
+        default="crawl4ai",
+        description="Default crawler backend",
+    )
+    default_crawler_delay: float = Field(
+        default=1.0,
+        ge=0.0,
+        le=10.0,
+        description="Default delay between crawl requests in seconds",
+    )
+    default_crawler_timeout: int = Field(
+        default=30,
+        ge=1,
+        le=300,
+        description="Default request timeout in seconds",
+    )
+    default_crawler_wait_for_js: bool = Field(
+        default=True,
+        description="Default setting for waiting for JavaScript rendering",
+    )
+    default_crawler_max_concurrent: int = Field(
+        default=5,
+        ge=1,
+        le=50,
+        description="Default maximum concurrent crawl requests",
+    )
+
+    # Search depth settings
+    default_max_search_rounds: int = Field(
+        default=1,
+        ge=1,
+        description="Default maximum number of search rounds",
+    )
+    default_crawl_per_round: int = Field(
+        default=3,
+        ge=1,
+        le=200,
+        description="Default number of search results to crawl per round",
+    )
+    default_when_to_go_deeper: Literal["always", "expand_queries", "if_not_found"] = Field(
+        default="always",
+        description="Default strategy for multi-round search",
+    )
+    default_num_expanded_queries: int = Field(
+        default=2,
+        ge=0,
+        le=10,
+        description="Default number of expanded queries per expansion round",
+    )
+
+    # Save defaults
+    default_save_format: Literal["markdown", "html", "json", "all"] = Field(
+        default="all",
+        description="Default format for saved crawl results",
+    )
+    default_trace_format: Literal["json", "markdown", "jsonl"] = Field(
+        default="json",
+        description="Default format for search-crawl trace files",
+    )
+
     def get_log_level(self) -> int:
         """Convert log level string to logging constant.
 

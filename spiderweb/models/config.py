@@ -8,6 +8,7 @@ from typing import Any, Literal, Union
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from spiderweb.config import settings
 from spiderweb.models.document import ChunkType
 
 
@@ -472,7 +473,7 @@ class CrawlerConfig(BaseModel):
     """
     
     provider: str = Field(
-        default="crawl4ai",
+        default_factory=lambda: settings.default_crawler_provider,
         description="Crawler backend to use (built-in: 'crawl4ai', 'http', or custom)",
     )
     
@@ -504,11 +505,11 @@ class CrawlerConfig(BaseModel):
     
     # Content handling
     wait_for_js: bool = Field(
-        default=True,
+        default_factory=lambda: settings.default_crawler_wait_for_js,
         description="Wait for JavaScript rendering (crawl4ai only)",
     )
     timeout_seconds: int = Field(
-        default=30,
+        default_factory=lambda: settings.default_crawler_timeout,
         ge=1,
         le=300,
         description="Request timeout in seconds",
@@ -520,13 +521,13 @@ class CrawlerConfig(BaseModel):
     
     # Rate limiting
     delay_between_requests: float = Field(
-        default=1.0,
+        default_factory=lambda: settings.default_crawler_delay,
         ge=0.0,
         le=10.0,
         description="Delay between requests in seconds",
     )
     max_concurrent: int = Field(
-        default=5,
+        default_factory=lambda: settings.default_crawler_max_concurrent,
         ge=1,
         le=50,
         description="Maximum concurrent requests",
@@ -540,6 +541,20 @@ class CrawlerConfig(BaseModel):
     extra_config: dict[str, Any] = Field(
         default_factory=dict,
         description="Additional provider-specific configuration",
+    )
+    
+    # Crawl relevance filtering
+    crawl_relevance_prompt: str | None = Field(
+        default=None,
+        description=(
+            "Optional prompt describing what is good vs bad to crawl. "
+            "Used to filter URLs/links before crawling. "
+            "Example: 'Good: product pages, pricing, docs. Bad: login, signup, ads, footer links.'"
+        ),
+    )
+    crawl_relevance_use_llm: bool = Field(
+        default=True,
+        description="Use LLM for relevance filtering (if False, fall back to keyword/heuristic)",
     )
     
     model_config = ConfigDict(
@@ -616,6 +631,108 @@ class CrawlExtractionConfig(BaseModel):
                 "auto_improve": True,
                 "max_improve_iterations": 3,
                 "temperature": 0.0,
+            }
+        }
+    )
+
+
+class SearchProviderConfig(BaseModel):
+    """Configuration for web search providers.
+    
+    Defines which search backend to use and how many results to fetch.
+    The provider field accepts any string corresponding to a registered
+    search provider in search_provider_registry.
+    
+    Example:
+        # Built-in provider (when implemented)
+        config = SearchProviderConfig(provider="duckduckgo", limit=10)
+        
+        # Custom provider
+        config = SearchProviderConfig(provider="my-custom-search")
+    """
+    
+    provider: str = Field(
+        default_factory=lambda: settings.default_search_provider,
+        description="Search provider backend to use (registered in search_provider_registry)",
+    )
+    limit: int = Field(
+        default_factory=lambda: settings.default_search_limit,
+        ge=1,
+        le=100,
+        description="Maximum number of search results to return",
+    )
+    extra_config: dict[str, Any] = Field(
+        default_factory=dict,
+        description=(
+            "Additional provider-specific configuration. "
+            "For duckduckgo (ddgs): region, safesearch, timeout, timelimit (d/w/m/y), backend (e.g. duckduckgo, bing, brave), page."
+        ),
+    )
+    
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "provider": "duckduckgo",
+                "limit": 10,
+                "extra_config": {
+                    "region": "us-en",
+                    "safesearch": "moderate",
+                    "timelimit": "w",
+                    "backend": "duckduckgo",
+                },
+            }
+        }
+    )
+
+
+class SearchDepthConfig(BaseModel):
+    """Configuration for multi-round search and "go deeper" strategy.
+    
+    Controls how many search rounds to run and when to expand queries
+    or run additional searches if the answer isn't found.
+    """
+    
+    max_search_rounds: int = Field(
+        default_factory=lambda: settings.default_max_search_rounds,
+        ge=1,
+        le=999999,
+        description="Maximum number of search → crawl → decide rounds (use high value for 'run until Ctrl+C')",
+    )
+    crawl_results_per_round: int = Field(
+        default_factory=lambda: settings.default_crawl_per_round,
+        ge=1,
+        le=200,
+        description="How many search-result URLs to crawl per round",
+    )
+    when_to_go_deeper: Literal["always", "expand_queries", "if_not_found"] = Field(
+        default_factory=lambda: settings.default_when_to_go_deeper,
+        description=(
+            "Strategy for going deeper: "
+            "'always' = run all rounds, "
+            "'expand_queries' = use query expansion for additional searches, "
+            "'if_not_found' = check if answer found, then optionally continue"
+        ),
+    )
+    num_expanded_queries: int = Field(
+        default_factory=lambda: settings.default_num_expanded_queries,
+        ge=0,
+        le=10,
+        description="Number of expanded queries to generate per expansion round",
+    )
+    max_pages_total: int | None = Field(
+        default=None,
+        ge=1,
+        description="Cap total pages crawled across all rounds (None = no limit)",
+    )
+    
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "max_search_rounds": 2,
+                "crawl_results_per_round": 5,
+                "when_to_go_deeper": "expand_queries",
+                "num_expanded_queries": 3,
+                "max_pages_total": 20,
             }
         }
     )

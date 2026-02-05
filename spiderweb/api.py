@@ -12,6 +12,7 @@ if TYPE_CHECKING:
 
     from spiderweb.extractors.base import Extractor
 
+from spiderweb.config import settings
 from spiderweb.crawlers.base import CrawlResult
 from spiderweb.hooks import hooks as global_hooks
 from spiderweb.loaders.web_loader import WebLoader
@@ -21,6 +22,8 @@ from spiderweb.models.config import (
     CrawlExtractionConfig,
     CrawlerConfig,
     QueryExpansionConfig,
+    SearchDepthConfig,
+    SearchProviderConfig,
     ValidatorConfig,
     VectorStoreConfig,
 )
@@ -31,7 +34,12 @@ from spiderweb.pipeline.batch import BatchProcessor
 from spiderweb.pipeline.context import ContextRetriever
 from spiderweb.pipeline.processor import DocumentProcessor
 from spiderweb.pipeline.query_expansion import QueryExpander, reciprocal_rank_fusion
-from spiderweb.registry import chunker_registry, crawler_registry, extractor_registry
+from spiderweb.registry import chunker_registry, crawler_registry, extractor_registry, search_provider_registry
+from spiderweb.search.base import SearchResult, SearchResultBatch
+from spiderweb.search.relevance import filter_by_relevance
+from spiderweb.search.trace import FilteredCandidate, PageRecord, SearchCrawlTrace, SearchRound
+from spiderweb.search.writers import write_trace
+from spiderweb.utils.path_utils import sanitize_query_for_path
 
 logger = get_logger(__name__)
 
@@ -739,6 +747,367 @@ class Spiderweb:
                     errors=[],
                     warnings=[],
                 )
+
+    async def search_crawl_extract(
+        self,
+        query: str,
+        search_provider_config: SearchProviderConfig | None = None,
+        crawler_config: CrawlerConfig | None = None,
+        extraction_config: CrawlExtractionConfig | None = None,
+        depth_config: SearchDepthConfig | None = None,
+        output_schema: type | None = None,
+        ingest: bool = False,
+        save_to: str | Path | None = None,
+        save_format: str | None = None,
+        save_trace_to: str | Path | None = None,
+        trace_format: Literal["json", "markdown", "jsonl"] | None = None,
+    ) -> SearchCrawlTrace:
+        """Search the web, crawl results, and optionally extract structured data.
+        
+        Implements a multi-round search → crawl → extract pipeline with configurable
+        depth, relevance filtering, and query expansion. Builds a complete trace
+        of the search session including summaries, URLs, and provenance.
+        
+        Args:
+            query: Initial search query
+            search_provider_config: Search provider configuration
+            crawler_config: Crawler configuration (includes relevance prompt)
+            extraction_config: Optional extraction configuration
+            depth_config: Configuration for multi-round search and "go deeper" strategy
+            output_schema: Optional Pydantic schema for structured extraction
+            ingest: If True, ingest crawled content into vector store
+            save_to: Optional directory to save crawled content locally
+            save_format: Format for saved files - "markdown", "html", "json", or "all"
+            save_trace_to: Optional path to save search-crawl trace
+            trace_format: Format for trace file (json, markdown, or jsonl)
+            
+        Returns:
+            SearchCrawlTrace containing full session flow
+            
+        Example:
+            >>> from spiderweb.models.config import SearchProviderConfig, SearchDepthConfig
+            >>> 
+            >>> trace = await web.search_crawl_extract(
+            ...     "python web scraping",
+            ...     search_provider_config=SearchProviderConfig(provider="stub", limit=5),
+            ...     depth_config=SearchDepthConfig(max_search_rounds=2),
+            ...     save_trace_to="./trace.json",
+            ... )
+            >>> print(f"Crawled {len(trace.get_all_urls())} URLs")
+        """
+        # Initialize configs
+        search_config = search_provider_config or SearchProviderConfig()
+        crawler_config = crawler_config or CrawlerConfig()
+        depth_config = depth_config or SearchDepthConfig()
+        
+        # Use settings defaults if not provided
+        if save_format is None:
+            save_format = settings.default_save_format
+        if trace_format is None:
+            trace_format = settings.default_trace_format
+        
+        # Create trace
+        trace = SearchCrawlTrace(
+            original_query=query,
+            config_snapshot={
+                "search_provider": search_config.provider,
+                "max_rounds": depth_config.max_search_rounds,
+                "crawl_per_round": depth_config.crawl_results_per_round,
+                "when_to_go_deeper": depth_config.when_to_go_deeper,
+            },
+        )
+        
+        # Initialize search provider
+        try:
+            search_provider = search_provider_registry.create(
+                search_config.provider,
+                **search_config.extra_config,
+            )
+        except KeyError as e:
+            available_search = search_provider_registry.list()
+            crawler_names = crawler_registry.list()
+            hint = ""
+            if search_config.provider in crawler_names:
+                hint = (
+                    f" '{search_config.provider}' is a crawler (fetches URLs), not a search provider (finds URLs). "
+                    f"Use --crawl-provider {search_config.provider} for crawling. "
+                )
+            raise ValueError(
+                f"Unknown search provider: {search_config.provider}. "
+                f"Available search providers: {available_search}.{hint}"
+            ) from e
+        
+        # Initialize web loader for crawling
+        web_loader = WebLoader(
+            llm_client=self.llm_client,
+            crawler_config=crawler_config,
+            extraction_config=extraction_config,
+        )
+        
+        # Initialize storage if needed (by query so each search has its own subdir)
+        storage = None
+        if save_to:
+            from spiderweb.crawlers.storage import CrawlStorage
+            query_slug = sanitize_query_for_path(query)
+            output_dir = Path(save_to) / query_slug
+            storage = CrawlStorage(output_dir=output_dir)
+            logger.info(f"Will save crawled content to {output_dir}")
+        
+        # Track total pages crawled
+        total_pages_crawled = 0
+        all_crawled_urls = set()
+        
+        # Multi-round search loop
+        queries_to_try = [query]
+        
+        for round_num in range(1, depth_config.max_search_rounds + 1):
+            logger.info(f"Search round {round_num}/{depth_config.max_search_rounds}")
+            
+            # Check if we've hit max pages limit
+            if depth_config.max_pages_total and total_pages_crawled >= depth_config.max_pages_total:
+                logger.info(f"Reached max_pages_total limit ({depth_config.max_pages_total})")
+                break
+            
+            # Generate expanded queries if needed
+            if round_num > 1 and depth_config.when_to_go_deeper == "expand_queries":
+                if self.llm_client:
+                    from spiderweb.pipeline.query_expansion import QueryExpander
+                    from spiderweb.models.config import QueryExpansionConfig
+                    
+                    expander = QueryExpander(
+                        self.llm_client,
+                        QueryExpansionConfig(
+                            strategy="multi_query",
+                            num_expansions=depth_config.num_expanded_queries,
+                            include_original=False,
+                        ),
+                    )
+                    expanded = await expander.expand(query)
+                    queries_to_try = expanded[:depth_config.num_expanded_queries]
+                    logger.info(f"Generated {len(queries_to_try)} expanded queries for round {round_num}")
+                else:
+                    # No LLM, can't expand - use original query
+                    queries_to_try = [query]
+            elif round_num == 1:
+                # First round: use original query
+                queries_to_try = [query]
+            
+            # Set current_query for this round (used in trace)
+            current_query = queries_to_try[0] if queries_to_try else query
+            
+            # Execute searches for this round
+            round_pages = []
+            round_filtered = []
+            round_search_results = []
+            
+            for search_query in queries_to_try:
+                logger.info(f"  Searching: {search_query}")
+                # Search
+                search_results = await search_provider.search(
+                    search_query,
+                    limit=search_config.limit,
+                    **search_config.extra_config,
+                )
+                round_search_results.extend(search_results.results)
+            
+            # Dedupe URLs
+            seen_urls = set()
+            unique_results = []
+            for result in round_search_results:
+                if result.url not in seen_urls and result.url not in all_crawled_urls:
+                    seen_urls.add(result.url)
+                    unique_results.append(result)
+            
+            # Apply relevance filter if configured
+            candidates_to_crawl = unique_results
+            if crawler_config.crawl_relevance_prompt:
+                good_candidates, bad_candidates = await filter_by_relevance(
+                    self.llm_client,
+                    unique_results,
+                    crawler_config.crawl_relevance_prompt,
+                    use_llm=crawler_config.crawl_relevance_use_llm,
+                )
+                candidates_to_crawl = good_candidates
+                
+                # Record filtered candidates
+                for bad in bad_candidates:
+                    if isinstance(bad, FilteredCandidate):
+                        bad.source_query = current_query
+                        round_filtered.append(bad)
+                    else:
+                        # Dict case
+                        round_filtered.append(
+                            FilteredCandidate(
+                                url=bad.get("url", ""),
+                                title=bad.get("title"),
+                                snippet=bad.get("snippet"),
+                                source_query=current_query,
+                                filter_reason=bad.get("filter_reason", "relevance"),
+                            )
+                        )
+            
+            # Limit to crawl_results_per_round and respect max_pages_total
+            remaining_slots = depth_config.crawl_results_per_round
+            if depth_config.max_pages_total:
+                remaining_slots = min(
+                    remaining_slots,
+                    depth_config.max_pages_total - total_pages_crawled,
+                )
+            
+            candidates_to_crawl = candidates_to_crawl[:remaining_slots]
+            
+            if not candidates_to_crawl:
+                logger.info("No candidates to crawl in this round")
+                # Still record the round with filtered results
+                round_data = SearchRound(
+                    query=current_query,
+                    search_results=SearchResultBatch(
+                        results=round_search_results if round_search_results else [],
+                        query=current_query,
+                        total=len(round_search_results),
+                    ),
+                    pages=[],
+                    filtered_out=round_filtered,
+                )
+                trace.add_round(round_data)
+                break
+            
+            # Extract URLs
+            urls_to_crawl = [
+                r.url if isinstance(r, SearchResult) else r.get("url")
+                for r in candidates_to_crawl
+            ]
+            
+            # Crawl
+            logger.info(f"Crawling {len(urls_to_crawl)} URLs")
+            crawl_results = await web_loader.crawler.crawl_many(urls_to_crawl, crawler_config)
+            
+            # Build PageRecords
+            for i, crawl_result in enumerate(crawl_results):
+                if not isinstance(crawl_result, CrawlResult):
+                    continue
+                
+                candidate = candidates_to_crawl[i]
+                url = candidate.url if isinstance(candidate, SearchResult) else candidate.get("url", "")
+                
+                # Generate summary (truncate or use LLM if available)
+                summary = None
+                if crawl_result.markdown:
+                    summary = crawl_result.markdown[:500] + "..." if len(crawl_result.markdown) > 500 else crawl_result.markdown
+                
+                # Extract structured data if configured
+                extracted_data = None
+                if extraction_config and extraction_config.enabled and self.llm_client:
+                    from spiderweb.crawlers.extraction import CrawlExtractor
+                    
+                    extractor = CrawlExtractor(self.llm_client, extraction_config)
+                    try:
+                        extracted_data = await extractor.extract(
+                            crawl_result.markdown or crawl_result.content,
+                            schema=output_schema or extraction_config.output_schema,
+                            semantic_guide=extraction_config.semantic_guide,
+                            extraction_query=extraction_config.extraction_query,
+                        )
+                    except Exception as e:
+                        logger.warning(f"Extraction failed for {url}: {e}")
+                
+                page_record = PageRecord(
+                    url=url,
+                    summary=summary,
+                    crawl_result=crawl_result,
+                    source_query=current_query,
+                    source_position=(
+                        candidate.position
+                        if isinstance(candidate, SearchResult)
+                        else None
+                    ),
+                    extracted_data=extracted_data,
+                    links_found=crawl_result.links,
+                )
+                round_pages.append(page_record)
+                all_crawled_urls.add(url)
+                total_pages_crawled += 1
+                
+                # Save to local storage if requested
+                if storage:
+                    storage.save_crawl_result(crawl_result, format=save_format)
+            
+            # Create SearchRound and add to trace
+            round_data = SearchRound(
+                query=current_query,
+                search_results=SearchResultBatch(
+                    results=round_search_results,
+                    query=current_query,
+                    total=len(round_search_results),
+                ),
+                pages=round_pages,
+                filtered_out=round_filtered,
+            )
+            trace.add_round(round_data)
+            
+            # Decide if we should continue
+            if round_num >= depth_config.max_search_rounds:
+                break
+            
+            if depth_config.when_to_go_deeper == "always":
+                # Continue to next round
+                continue
+            elif depth_config.when_to_go_deeper == "if_not_found":
+                # Check if answer found (simplified: check if we got good results)
+                if len(round_pages) >= depth_config.crawl_results_per_round // 2:
+                    logger.info("Sufficient results found, stopping")
+                    break
+        
+        # Save trace if requested (by query so each search has its own file)
+        if save_trace_to:
+            base = Path(save_trace_to)
+            query_slug = sanitize_query_for_path(query)
+            if base.suffix.lower() in (".json", ".jsonl", ".md"):
+                trace_dir = base.parent
+            else:
+                trace_dir = base
+            trace_dir.mkdir(parents=True, exist_ok=True)
+            trace_path = trace_dir / f"{query_slug}.{trace_format}"
+            write_trace(trace, trace_path, format=trace_format)
+            logger.info(f"Saved trace to {trace_path}")
+        
+        # Create index if storage was used
+        if storage:
+            storage.create_index()
+        
+        # Handle ingestion if requested
+        if ingest:
+            # Ingest all crawled pages
+            for round_data in trace.rounds:
+                for page in round_data.pages:
+                    if page.crawl_result and page.crawl_result.success:
+                        doc = await web_loader.load(
+                            page.url,
+                            crawler_config=crawler_config,
+                            extraction_config=extraction_config,
+                            output_schema=output_schema,
+                        )
+                        
+                        # Process through pipeline
+                        doc.chunks = self.document_processor.chunker.chunk(doc)
+                        
+                        if self.document_processor.enable_validation and self.document_processor.validator:
+                            validation_results = await self.document_processor.validator.validate_batch(doc.chunks)
+                            valid_chunks = [
+                                chunk for chunk, result in zip(doc.chunks, validation_results)
+                                if result.passed
+                            ]
+                            doc.chunks = valid_chunks
+                        
+                        if self.document_processor.enable_embedding and self.llm_client:
+                            doc.chunks = await self.document_processor._generate_embeddings(doc.chunks)
+                        
+                        if doc.chunks:
+                            chunks_with_embeddings = [c for c in doc.chunks if c.embedding is not None]
+                            if chunks_with_embeddings:
+                                await self.document_processor.vector_store.upsert(chunks_with_embeddings)
+        
+        return trace
 
     async def crawl_and_query(
         self,

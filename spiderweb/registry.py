@@ -38,6 +38,7 @@ if TYPE_CHECKING:
     from spiderweb.chunkers.base import Chunker
     from spiderweb.crawlers.base import Crawler
     from spiderweb.extractors.base import Extractor
+    from spiderweb.search.base import SearchProvider
 
 T = TypeVar("T")
 
@@ -184,3 +185,4 @@ class ComponentRegistry(Generic[T]):
 chunker_registry: ComponentRegistry["Chunker"] = ComponentRegistry("chunker")
 crawler_registry: ComponentRegistry["Crawler"] = ComponentRegistry("crawler")
 extractor_registry: ComponentRegistry["Extractor"] = ComponentRegistry("extractor")
+search_provider_registry: ComponentRegistry["SearchProvider"] = ComponentRegistry("search_provider")
