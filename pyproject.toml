@@ -3,7 +3,7 @@ requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "spiderwebllm"
+name = "spiderweb"
 version = "0.1.0"
 description = "Scalable document processing and RAG pipeline with cross-validation, intelligent chunking, and pluggable vector stores"
 readme = "README.md"
@@ -101,11 +101,12 @@ dev = [
     "pytest-cov>=4.1.0",
     "ruff>=0.14.10",
     "pre-commit>=4.5.1",
+    "mypy>=1.0.0",
 ]
 
 # All optional features
 all = [
-    "spiderwebllm[pdf,office,ocr,mcp,api]",
+    "spiderweb[pdf,office,ocr,mcp,api]",
 ]
 
 [project.urls]

@@ -1,0 +1,15 @@
+version: '3.8'
+
+# Development override for docker-compose.yml
+# Mounts source code for live reloading
+
+services:
+  spiderweb:
+    volumes:
+      # Mount source code for live editing
+      - ./spiderweb:/app/spiderweb:ro
+      - ./tests:/app/tests:ro
+      - ./examples:/app/examples:ro
+      # Keep existing volumes
+      - ./logs:/app/logs
+      - ./data:/app/data

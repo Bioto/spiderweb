@@ -23,3 +23,13 @@ __all__ = [
 search_provider_registry.register("duckduckgo", DuckDuckGoSearchProvider)
 # Register stub for testing/development
 search_provider_registry.register("stub", StubSearchProvider)
+
+# Register Tavily (requires TAVILY_API_KEY)
+try:
+    from spiderweb.search.tavily import TavilySearchProvider
+
+    search_provider_registry.register("tavily", TavilySearchProvider)
+    __all__.append("TavilySearchProvider")
+except ImportError:
+    # Tavily not available (tavily-python not installed)
+    pass

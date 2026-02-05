@@ -18,6 +18,7 @@ from spiderweb.models.config import BatchConfig
 from spiderweb.models.result import BatchIngestionResult, IngestionResult
 from spiderweb.observability.logging_config import get_logger
 from spiderweb.pipeline.processor import DocumentProcessor
+from spiderweb.utils.ingest_cache import IngestCache
 
 logger = get_logger(__name__)
 
@@ -59,10 +60,16 @@ class BatchProcessor:
         else:
             self.document_processor = DocumentProcessor(llm_client=llm_client)
 
+        # Initialize ingest cache if enabled
+        self.cache: IngestCache | None = None
+        if self.config.use_cache:
+            self.cache = IngestCache()
+
         logger.info(
             f"Initialized BatchProcessor: "
             f"max_concurrent_extractions={self.config.max_concurrent_extractions}, "
-            f"max_concurrent_embeddings={self.config.max_concurrent_embeddings}"
+            f"max_concurrent_embeddings={self.config.max_concurrent_embeddings}, "
+            f"use_cache={self.config.use_cache}"
         )
 
     async def _process_single_document(
@@ -82,6 +89,9 @@ class BatchProcessor:
         async with semaphore:
             try:
                 result = await self.document_processor.process(file_path)
+                # Update cache on success
+                if self.cache and result.success and result.document:
+                    self.cache.update(file_path, result.document.id)
                 return (file_path, result)
             except Exception as e:
                 logger.error(f"Failed to process {file_path.name}: {e}", exc_info=True)
@@ -138,7 +148,19 @@ class BatchProcessor:
                 results=[],
             )
 
-        logger.info(f"Starting batch processing of {len(file_paths)} files")
+        # Filter files using cache if enabled
+        files_to_process = file_paths
+        if self.cache and not self.config.force:
+            files_to_process = [
+                path
+                for path in file_paths
+                if self.cache.should_process(path, force=False)
+            ]
+            skipped = len(file_paths) - len(files_to_process)
+            if skipped > 0:
+                logger.info(f"Skipping {skipped} unchanged files (use --force to re-process)")
+
+        logger.info(f"Starting batch processing of {len(files_to_process)} files")
 
         start_time = time.time()
         started_at = datetime.now()
@@ -147,7 +169,7 @@ class BatchProcessor:
         semaphore = asyncio.Semaphore(self.config.max_concurrent_extractions)
 
         # Process files concurrently
-        tasks = [self._process_single_document(path, semaphore) for path in file_paths]
+        tasks = [self._process_single_document(path, semaphore) for path in files_to_process]
 
         # Track progress
         results = []
@@ -161,7 +183,11 @@ class BatchProcessor:
                 errors_by_file[str(file_path)] = result.errors
 
             if show_progress and processed_count % 10 == 0:
-                logger.info(f"Progress: {processed_count}/{len(file_paths)} documents processed")
+                logger.info(f"Progress: {processed_count}/{len(files_to_process)} documents processed")
+
+        # Save cache if enabled
+        if self.cache:
+            self.cache.save()
 
         # Calculate statistics
         processing_time = time.time() - start_time
@@ -176,12 +202,12 @@ class BatchProcessor:
         average_time = processing_time / len(results) if results else 0.0
 
         logger.info(
-            f"Batch processing complete: {successful_documents}/{len(file_paths)} successful, "
+            f"Batch processing complete: {successful_documents}/{len(files_to_process)} successful, "
             f"{total_chunks} chunks created, {processing_time:.2f}s"
         )
 
         return BatchIngestionResult(
-            total_documents=len(file_paths),
+            total_documents=len(files_to_process),
             successful_documents=successful_documents,
             failed_documents=failed_documents,
             total_chunks=total_chunks,

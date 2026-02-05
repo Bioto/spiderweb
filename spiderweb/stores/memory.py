@@ -3,7 +3,7 @@
 Simple implementation that stores chunks in memory without persistence.
 """
 
-from typing import Literal
+from typing import Any, Literal
 
 from spiderweb.models.document import Chunk
 from spiderweb.observability.logging_config import get_logger
@@ -56,7 +56,7 @@ class MemoryVectorStore:
         Args:
             embedding: Query embedding
             top_k: Number of results
-            filter_dict: Metadata filters (not implemented for memory store)
+            filter_dict: Metadata filters (supports exact match and list "any of" match)
 
         Returns:
             List of (chunk, score) tuples
@@ -64,9 +64,18 @@ class MemoryVectorStore:
         if not self._chunks:
             return []
 
+        # Filter chunks by metadata if filter_dict provided
+        chunks_to_search = list(self._chunks.values())
+        if filter_dict:
+            chunks_to_search = self._filter_chunks(chunks_to_search, filter_dict)
+
+        if not chunks_to_search:
+            logger.debug("No chunks match filter criteria")
+            return []
+
         # Calculate similarities
         similarities = []
-        for chunk in self._chunks.values():
+        for chunk in chunks_to_search:
             if chunk.embedding:
                 similarity = cosine_similarity(embedding, chunk.embedding)
                 similarities.append((chunk, similarity))
@@ -75,9 +84,82 @@ class MemoryVectorStore:
         similarities.sort(key=lambda x: x[1], reverse=True)
         results = similarities[:top_k]
 
-        logger.debug(f"Query returned {len(results)} results")
+        logger.debug(f"Query returned {len(results)} results (filtered from {len(chunks_to_search)} chunks)")
 
         return results
+
+    def _filter_chunks(self, chunks: list[Chunk], filter_dict: dict) -> list[Chunk]:
+        """Filter chunks by metadata matching filter_dict.
+
+        Args:
+            chunks: List of chunks to filter
+            filter_dict: Filter criteria (key: value or key: [value1, value2, ...])
+
+        Returns:
+            Filtered list of chunks
+        """
+        filtered = []
+        for chunk in chunks:
+            matches = True
+            for key, value in filter_dict.items():
+                # Get metadata value (supports nested keys like metadata.document_id)
+                chunk_value = self._get_metadata_value(chunk, key)
+                if chunk_value is None:
+                    matches = False
+                    break
+
+                # Handle list values (match any)
+                if isinstance(value, list):
+                    if chunk_value not in value:
+                        matches = False
+                        break
+                else:
+                    # Exact match
+                    if chunk_value != value:
+                        matches = False
+                        break
+
+            if matches:
+                filtered.append(chunk)
+
+        return filtered
+
+    def _get_metadata_value(self, chunk: Chunk, key: str) -> Any:
+        """Get metadata value from chunk by key.
+
+        Supports nested keys like "document_id" (from chunk.metadata.document_id)
+        or "source" (from chunk.metadata.source).
+
+        Args:
+            chunk: Chunk to extract value from
+            key: Metadata key
+
+        Returns:
+            Metadata value or None if not found
+        """
+        # Try direct metadata attribute
+        if hasattr(chunk.metadata, key):
+            return getattr(chunk.metadata, key)
+
+        # Try metadata.extra dict
+        if hasattr(chunk.metadata, "extra") and isinstance(chunk.metadata.extra, dict):
+            if key in chunk.metadata.extra:
+                return chunk.metadata.extra[key]
+
+        # Try nested keys (e.g., "metadata.document_id")
+        if "." in key:
+            parts = key.split(".")
+            value = chunk.metadata
+            for part in parts:
+                if hasattr(value, part):
+                    value = getattr(value, part)
+                elif isinstance(value, dict) and part in value:
+                    value = value[part]
+                else:
+                    return None
+            return value
+
+        return None
 
     async def delete(self, chunk_ids: list[str]) -> None:
         """Delete chunks.

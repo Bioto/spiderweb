@@ -1,6 +1,6 @@
-# Contributing to GlueLLM
+# Contributing to Spiderweb
 
-Thank you for your interest in contributing to GlueLLM! This document provides guidelines and instructions for contributing.
+Thank you for your interest in contributing to Spiderweb! This document provides guidelines and instructions for contributing.
 
 ## Getting Started
 
@@ -34,11 +34,17 @@ Thank you for your interest in contributing to GlueLLM! This document provides g
   ```bash
   uv run pytest tests/
   ```
-- For integration tests that require API keys, mark them with `@pytest.mark.integration`
-- Skip integration tests when running locally:
+- For integration tests that require API keys or external services, mark them with `@pytest.mark.integration`
+- For slow tests (e.g., full crawl tests, large document processing), mark them with `@pytest.mark.slow`
+- Skip integration/slow tests when running locally:
   ```bash
-  uv run pytest -m "not integration"
+  uv run pytest -m "not integration and not slow"
   ```
+  
+  **Note:** Most current tests are unit tests and don't require markers. Use markers for:
+  - Tests that make real API calls (LLM, web requests)
+  - Tests that take > 1 second to run
+  - Tests that require external services (Qdrant, crawl4ai with browsers)
 
 ### Documentation
 
@@ -74,7 +80,7 @@ When reporting issues, please include:
 - **Steps to Reproduce**: Detailed steps to reproduce the behavior
 - **Expected Behavior**: What you expected to happen
 - **Actual Behavior**: What actually happened
-- **Environment**: Python version, OS, GlueLLM version
+- **Environment**: Python version, OS, Spiderweb version
 - **Error Messages**: Full error traceback if applicable
 
 ## Feature Requests
@@ -108,4 +114,4 @@ If you have questions, feel free to:
 - Check existing issues and PRs
 - Review the README.md for usage examples
 
-Thank you for contributing to GlueLLM! 🎉
+Thank you for contributing to Spiderweb! 🎉

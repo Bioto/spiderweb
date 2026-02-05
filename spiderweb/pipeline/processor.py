@@ -128,6 +128,19 @@ class DocumentProcessor:
 
                 self.vector_store = QdrantVectorStore.from_config(store_config)
                 logger.info(f"Initialized Qdrant vector store: {store_config.collection_name}")
+            elif store_config.provider == "chroma":
+                from spiderweb.stores.chroma import ChromaVectorStore
+
+                persist_dir = None
+                if hasattr(store_config, "extra_config") and store_config.extra_config:
+                    persist_dir = store_config.extra_config.get("persist_directory")
+
+                self.vector_store = ChromaVectorStore(
+                    collection_name=store_config.collection_name,
+                    persist_directory=persist_dir,
+                    embedding_dimension=getattr(store_config, "embedding_dimension", 1536),
+                )
+                logger.info(f"Initialized Chroma vector store: {store_config.collection_name}")
             else:
                 # Default to memory store
                 self.vector_store = MemoryVectorStore()
@@ -360,162 +373,178 @@ class DocumentProcessor:
         path = Path(file_path)
         start_time = time.time()
 
-        logger.info(f"Processing document: {path.name}")
+        # Start tracing span
+        from spiderweb.observability.tracing import span
 
-        errors = []
-        warnings = []
+        with span("process_document", {"file_path": str(path), "file_name": path.name}):
+            logger.info(f"Processing document: {path.name}")
 
-        try:
-            # Hook: BEFORE_EXTRACT
-            ctx = await self.hooks.run(HookPoint.BEFORE_EXTRACT, str(path), file_path=str(path))
-            if ctx.skip:
-                logger.info(f"Extraction skipped by hook for {path.name}")
-                return self._create_skipped_result(path, start_time, "Skipped by BEFORE_EXTRACT hook")
-            extract_path = Path(ctx.modified_data) if ctx.modified_data else path
+            errors = []
+            warnings = []
 
-            # 1. Load and extract
-            logger.debug(f"Step 1/5: Extracting content from {extract_path.name}")
-            document = await self.file_loader.load(extract_path)
+            try:
+                # Hook: BEFORE_EXTRACT
+                ctx = await self.hooks.run(HookPoint.BEFORE_EXTRACT, str(path), file_path=str(path))
+                if ctx.skip:
+                    logger.info(f"Extraction skipped by hook for {path.name}")
+                    return self._create_skipped_result(path, start_time, "Skipped by BEFORE_EXTRACT hook")
+                extract_path = Path(ctx.modified_data) if ctx.modified_data else path
 
-            # Override document ID if provided (allows external systems to control the ID)
-            if document_id:
-                document.id = document_id
-                logger.debug(f"Using custom document ID: {document_id}")
+                # 1. Load and extract
+                logger.debug(f"Step 1/5: Extracting content from {extract_path.name}")
+                document = await self.file_loader.load(extract_path)
 
-            # Hook: AFTER_EXTRACT
-            ctx = await self.hooks.run(HookPoint.AFTER_EXTRACT, document, file_path=str(path))
-            if ctx.modified_data is not None:
-                document = ctx.modified_data
+                # Override document ID if provided (allows external systems to control the ID)
+                if document_id:
+                    document.id = document_id
+                    logger.debug(f"Using custom document ID: {document_id}")
 
-            # Hook: BEFORE_CHUNK
-            ctx = await self.hooks.run(HookPoint.BEFORE_CHUNK, document, file_path=str(path))
-            if ctx.skip:
-                logger.info(f"Chunking skipped by hook for {path.name}")
-                return self._create_skipped_result(path, start_time, "Skipped by BEFORE_CHUNK hook")
-            if ctx.modified_data is not None:
-                document = ctx.modified_data
+                # Hook: AFTER_EXTRACT
+                ctx = await self.hooks.run(HookPoint.AFTER_EXTRACT, document, file_path=str(path))
+                if ctx.modified_data is not None:
+                    document = ctx.modified_data
 
-            # 2. Chunk
-            logger.debug("Step 2/5: Chunking document")
-            chunks = self.chunker.chunk(document)
+                # Hook: BEFORE_CHUNK
+                ctx = await self.hooks.run(HookPoint.BEFORE_CHUNK, document, file_path=str(path))
+                if ctx.skip:
+                    logger.info(f"Chunking skipped by hook for {path.name}")
+                    return self._create_skipped_result(path, start_time, "Skipped by BEFORE_CHUNK hook")
+                if ctx.modified_data is not None:
+                    document = ctx.modified_data
 
-            # Hook: AFTER_CHUNK
-            ctx = await self.hooks.run(HookPoint.AFTER_CHUNK, chunks, document=document, file_path=str(path))
-            if ctx.modified_data is not None:
-                chunks = ctx.modified_data
+                # 2. Chunk
+                logger.debug("Step 2/5: Chunking document")
+                chunks = self.chunker.chunk(document)
 
-            document.chunks = chunks
+                # Hook: AFTER_CHUNK
+                ctx = await self.hooks.run(HookPoint.AFTER_CHUNK, chunks, document=document, file_path=str(path))
+                if ctx.modified_data is not None:
+                    chunks = ctx.modified_data
 
-            chunks_created = len(chunks)
-            logger.info(f"Created {chunks_created} chunks from {path.name}")
-
-            # 3. Validate
-            chunks_validated = 0
-            chunks_rejected = 0
-
-            if self.enable_validation and self.validator:
-                logger.debug(f"Step 3/5: Validating {len(chunks)} chunks")
-                validation_results = await self.validator.validate_batch(chunks)
-
-                # Filter out invalid chunks
-                valid_chunks = []
-                for chunk, result in zip(chunks, validation_results, strict=True):
-                    if result.passed:
-                        valid_chunks.append(chunk)
-                        chunks_validated += 1
-                    else:
-                        chunks_rejected += 1
-                        logger.debug(f"Rejected chunk {chunk.id}: {result.issues}")
-
-                chunks = valid_chunks
                 document.chunks = chunks
 
-                if chunks_rejected > 0:
-                    warnings.append(f"Rejected {chunks_rejected} low-quality chunks")
-            else:
-                chunks_validated = len(chunks)
-                logger.debug("Step 3/5: Skipping validation (disabled)")
+                chunks_created = len(chunks)
+                logger.info(f"Created {chunks_created} chunks from {path.name}")
 
-            # 4. Generate embeddings
-            embedding_start = time.time()
+                # 3. Validate
+                chunks_validated = 0
+                chunks_rejected = 0
 
-            if self.enable_embedding and self.llm_client:
-                logger.debug(f"Step 4/5: Generating embeddings for {len(chunks)} chunks")
-                chunks = await self._generate_embeddings(chunks)
-                document.chunks = chunks
-            else:
-                logger.debug("Step 4/5: Skipping embedding generation (disabled or no LLM client)")
+                if self.enable_validation and self.validator:
+                    logger.debug(f"Step 3/5: Validating {len(chunks)} chunks")
+                    validation_results = await self.validator.validate_batch(chunks)
 
-            embedding_time = time.time() - embedding_start
+                    # Filter out invalid chunks
+                    valid_chunks = []
+                    for chunk, result in zip(chunks, validation_results, strict=True):
+                        if result.passed:
+                            valid_chunks.append(chunk)
+                            chunks_validated += 1
+                        else:
+                            chunks_rejected += 1
+                            logger.debug(f"Rejected chunk {chunk.id}: {result.issues}")
 
-            # 5. Store in vector database
-            if store_chunks and chunks:
-                logger.debug(f"Step 5/5: Storing {len(chunks)} chunks in vector store")
+                    chunks = valid_chunks
+                    document.chunks = chunks
 
-                # Only store chunks with embeddings
-                chunks_with_embeddings = [c for c in chunks if c.embedding is not None]
+                    if chunks_rejected > 0:
+                        warnings.append(f"Rejected {chunks_rejected} low-quality chunks")
+                else:
+                    chunks_validated = len(chunks)
+                    logger.debug("Step 3/5: Skipping validation (disabled)")
 
-                if chunks_with_embeddings:
-                    await self.vector_store.upsert(chunks_with_embeddings)
-                    logger.info(f"Stored {len(chunks_with_embeddings)} chunks in vector store")
-                elif self.enable_embedding:
-                    warnings.append("No chunks with embeddings to store")
-            else:
-                logger.debug("Step 5/5: Skipping vector store (disabled or no chunks)")
+                # 4. Generate embeddings
+                embedding_start = time.time()
 
-            processing_time = time.time() - start_time
+                if self.enable_embedding and self.llm_client:
+                    logger.debug(f"Step 4/5: Generating embeddings for {len(chunks)} chunks")
+                    chunks = await self._generate_embeddings(chunks)
+                    document.chunks = chunks
+                else:
+                    logger.debug("Step 4/5: Skipping embedding generation (disabled or no LLM client)")
 
-            # Create result
-            result = IngestionResult(
-                document=document,
-                success=True,
-                chunks_created=chunks_created,
-                chunks_validated=chunks_validated,
-                chunks_rejected=chunks_rejected,
-                chunks_deduplicated=0,  # Tracked by validator
-                processing_time_seconds=processing_time,
-                embedding_time_seconds=embedding_time,
-                errors=errors,
-                warnings=warnings,
-            )
+                embedding_time = time.time() - embedding_start
 
-            logger.info(
-                f"Successfully processed {path.name}: "
-                f"{chunks_created} chunks, {chunks_validated} validated, "
-                f"{processing_time:.2f}s"
-            )
+                # 5. Store in vector database
+                if store_chunks and chunks:
+                    logger.debug(f"Step 5/5: Storing {len(chunks)} chunks in vector store")
 
-            return result
+                    # Only store chunks with embeddings
+                    chunks_with_embeddings = [c for c in chunks if c.embedding is not None]
 
-        except Exception as e:
-            processing_time = time.time() - start_time
-            error_msg = f"Failed to process {path.name}: {e}"
-            logger.error(error_msg, exc_info=True)
-            errors.append(error_msg)
+                    if chunks_with_embeddings:
+                        await self.vector_store.upsert(chunks_with_embeddings)
+                        logger.info(f"Stored {len(chunks_with_embeddings)} chunks in vector store")
+                    elif self.enable_embedding:
+                        warnings.append("No chunks with embeddings to store")
+                else:
+                    logger.debug("Step 5/5: Skipping vector store (disabled or no chunks)")
 
-            # Return failed result
-            failed_metadata = (
-                document.metadata
-                if "document" in locals() and hasattr(document, "metadata")
-                else DocumentMetadata(
-                    source=str(path),
-                    file_type="unknown",
-                    extraction_method="none",
+                processing_time = time.time() - start_time
+
+                # Create result
+                result = IngestionResult(
+                    document=document,
+                    success=True,
+                    chunks_created=chunks_created,
+                    chunks_validated=chunks_validated,
+                    chunks_rejected=chunks_rejected,
+                    chunks_deduplicated=0,  # Tracked by validator
+                    processing_time_seconds=processing_time,
+                    embedding_time_seconds=embedding_time,
+                    errors=errors,
+                    warnings=warnings,
                 )
-            )
 
-            return IngestionResult(
-                document=Document(
-                    raw_content="",
-                    markdown_content="",
-                    metadata=failed_metadata,
-                ),
-                success=False,
-                chunks_created=0,
-                chunks_validated=0,
-                chunks_rejected=0,
-                processing_time_seconds=processing_time,
-                embedding_time_seconds=0.0,
-                errors=errors,
-                warnings=warnings,
-            )
+                logger.info(
+                    f"Successfully processed {path.name}: "
+                    f"{chunks_created} chunks, {chunks_validated} validated, "
+                    f"{processing_time:.2f}s"
+                )
+
+                return result
+
+            except Exception as e:
+                processing_time = time.time() - start_time
+                error_msg = f"Failed to process {path.name}: {e}"
+                logger.error(error_msg, exc_info=True)
+                errors.append(error_msg)
+
+                # Return failed result
+                failed_metadata = (
+                    document.metadata
+                    if "document" in locals() and hasattr(document, "metadata")
+                    else DocumentMetadata(
+                        source=str(path),
+                        file_type="unknown",
+                        extraction_method="none",
+                    )
+                )
+
+                # Record metrics for failure
+                try:
+                    from spiderweb.observability.metrics import (
+                        increment_documents_processed,
+                        record_ingest_duration,
+                    )
+
+                    record_ingest_duration(processing_time, success=False)
+                    increment_documents_processed(1, success=False)
+                except Exception:
+                    pass
+
+                return IngestionResult(
+                    document=Document(
+                        raw_content="",
+                        markdown_content="",
+                        metadata=failed_metadata,
+                    ),
+                    success=False,
+                    chunks_created=0,
+                    chunks_validated=0,
+                    chunks_rejected=0,
+                    processing_time_seconds=processing_time,
+                    embedding_time_seconds=0.0,
+                    errors=errors,
+                    warnings=warnings,
+                )

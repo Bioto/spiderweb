@@ -156,6 +156,13 @@ class Crawl4AICrawler:
         if config.user_agent:
             run_config_dict["user_agent"] = config.user_agent
         
+        # Map headers and cookies if provided
+        if config.headers:
+            run_config_dict["headers"] = config.headers
+        if config.cookies:
+            # crawl4ai expects cookies as a dict or CookieJar
+            run_config_dict["cookies"] = config.cookies
+        
         # Merge extra_config (allows power users to override or add any CrawlerRunConfig field)
         run_config_dict.update(config.extra_config)
         

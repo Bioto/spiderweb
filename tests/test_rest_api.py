@@ -228,6 +228,101 @@ class TestRequestResponseModels:
         assert len(response.urls_crawled) == 2
         assert len(response.urls_filtered) == 1
 
+    def test_ingest_request_model(self):
+        """IngestRequest model works correctly."""
+        from spiderweb.rest_api import IngestRequest
+
+        request = IngestRequest(
+            path="/path/to/file.pdf",
+            chunker="semantic",
+            chunk_size=2000,
+            recursive=False,
+        )
+
+        assert request.path == "/path/to/file.pdf"
+        assert request.chunker == "semantic"
+        assert request.chunk_size == 2000
+        assert request.recursive is False
+
+    def test_ingest_request_defaults(self):
+        """IngestRequest has correct defaults."""
+        from spiderweb.rest_api import IngestRequest
+
+        request = IngestRequest(path="/path/to/file.pdf")
+
+        assert request.chunker == "hierarchical"
+        assert request.chunk_size == 1000
+        assert request.chunk_overlap == 200
+        assert request.recursive is True
+        assert request.vector_store_url is None
+        assert request.force is False
+
+    def test_ingest_response_model(self):
+        """IngestResponse model works correctly."""
+        from spiderweb.rest_api import IngestResponse
+
+        response = IngestResponse(
+            success=True,
+            total_documents=5,
+            successful_documents=4,
+            failed_documents=1,
+            total_chunks=100,
+            processing_time_seconds=2.5,
+        )
+
+        assert response.success is True
+        assert response.total_documents == 5
+        assert response.successful_documents == 4
+        assert response.failed_documents == 1
+        assert response.total_chunks == 100
+
+    def test_query_request_model(self):
+        """QueryRequest model works correctly."""
+        from spiderweb.rest_api import QueryRequest
+
+        request = QueryRequest(
+            query="test query",
+            top_k=10,
+            filter={"document_id": "doc1"},
+            expand=True,
+        )
+
+        assert request.query == "test query"
+        assert request.top_k == 10
+        assert request.filter == {"document_id": "doc1"}
+        assert request.expand is True
+
+    def test_query_request_defaults(self):
+        """QueryRequest has correct defaults."""
+        from spiderweb.rest_api import QueryRequest
+
+        request = QueryRequest(query="test")
+
+        assert request.top_k == 5
+        assert request.filter is None
+        assert request.expand is False
+        assert request.expand_strategy == "multi_query"
+        assert request.expand_num == 3
+        assert request.vector_store_url is None
+
+    def test_query_response_model(self):
+        """QueryResponse model works correctly."""
+        from spiderweb.rest_api import QueryResponse
+
+        response = QueryResponse(
+            query="test query",
+            chunks=[
+                {"content": "Chunk 1", "score": 0.9, "metadata": {}},
+                {"content": "Chunk 2", "score": 0.8, "metadata": {}},
+            ],
+            expanded_queries=["test query", "alternative query"],
+        )
+
+        assert response.query == "test query"
+        assert len(response.chunks) == 2
+        assert response.expanded_queries is not None
+        assert len(response.expanded_queries) == 2
+
 
 class TestCreateApp:
     """Tests for FastAPI app creation."""
@@ -256,6 +351,8 @@ class TestCreateApp:
         assert "/crawl" in route_paths
         assert "/crawl/batch" in route_paths
         assert "/search" in route_paths
+        assert "/ingest" in route_paths
+        assert "/query" in route_paths
         assert "/health" in route_paths
 
     def test_create_app_metadata(self):
@@ -309,6 +406,128 @@ class TestFastAPIEndpoints:
         """Crawl batch endpoint exists and accepts expected format."""
         # Similar to above - verifying endpoint structure
         pass  # Skipping deep integration test
+
+    def test_ingest_endpoint_with_mocked_spiderweb(self, client):
+        """Ingest endpoint works with mocked Spiderweb instance."""
+        import tempfile
+        from pathlib import Path
+
+        # Create a temporary file
+        with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".txt") as f:
+            f.write("Test content")
+            temp_path = f.name
+
+        try:
+            # Mock _get_spiderweb_instance
+            mock_web = AsyncMock()
+            mock_result = MagicMock()
+            mock_result.success = True
+            mock_result.chunks_created = 5
+            mock_result.processing_time_seconds = 1.0
+            mock_result.errors = []
+            mock_web.ingest = AsyncMock(return_value=mock_result)
+            mock_web.batch_processor = MagicMock()
+            mock_web.batch_processor.config = MagicMock()
+            mock_web.chunker_config = None
+
+            with patch("spiderweb.rest_api._get_spiderweb_instance", return_value=mock_web):
+                response = client.post(
+                    "/ingest",
+                    json={
+                        "path": temp_path,
+                        "chunker": "hierarchical",
+                        "chunk_size": 1000,
+                    },
+                )
+
+                assert response.status_code == 200
+                data = response.json()
+                assert data["success"] is True
+                assert data["total_chunks"] == 5
+        finally:
+            Path(temp_path).unlink(missing_ok=True)
+
+    def test_ingest_endpoint_nonexistent_path(self, client):
+        """Ingest endpoint returns 404 for nonexistent path."""
+        with patch("spiderweb.rest_api._get_spiderweb_instance"):
+            response = client.post(
+                "/ingest",
+                json={"path": "/nonexistent/path/file.txt"},
+            )
+
+            assert response.status_code == 404
+
+    def test_query_endpoint_with_mocked_spiderweb(self, client):
+        """Query endpoint works with mocked Spiderweb instance."""
+        mock_web = AsyncMock()
+        mock_result = MagicMock()
+        mock_result.chunks = [
+            {"content": "Result 1", "score": 0.9, "metadata": {}},
+            {"content": "Result 2", "score": 0.8, "metadata": {}},
+        ]
+        mock_result.expanded_queries = None
+        mock_web.query = AsyncMock(return_value=mock_result)
+
+        with patch("spiderweb.rest_api._get_spiderweb_instance", return_value=mock_web):
+            response = client.post(
+                "/query",
+                json={
+                    "query": "test query",
+                    "top_k": 5,
+                },
+            )
+
+            assert response.status_code == 200
+            data = response.json()
+            assert data["query"] == "test query"
+            assert len(data["chunks"]) == 2
+            assert data["chunks"][0]["content"] == "Result 1"
+            assert data["chunks"][0]["score"] == 0.9
+
+    def test_query_endpoint_with_expansion(self, client):
+        """Query endpoint includes expanded_queries when expansion enabled."""
+        mock_web = AsyncMock()
+        mock_result = MagicMock()
+        mock_result.chunks = [{"content": "Result", "score": 0.9, "metadata": {}}]
+        mock_result.expanded_queries = ["test query", "alternative query"]
+        mock_web.query = AsyncMock(return_value=mock_result)
+
+        with patch("spiderweb.rest_api._get_spiderweb_instance", return_value=mock_web):
+            response = client.post(
+                "/query",
+                json={
+                    "query": "test query",
+                    "expand": True,
+                    "expand_strategy": "multi_query",
+                },
+            )
+
+            assert response.status_code == 200
+            data = response.json()
+            assert data["expanded_queries"] is not None
+            assert len(data["expanded_queries"]) == 2
+
+    def test_query_endpoint_with_filter(self, client):
+        """Query endpoint passes filter to Spiderweb query."""
+        mock_web = AsyncMock()
+        mock_result = MagicMock()
+        mock_result.chunks = []
+        mock_result.expanded_queries = None
+        mock_web.query = AsyncMock(return_value=mock_result)
+
+        with patch("spiderweb.rest_api._get_spiderweb_instance", return_value=mock_web):
+            response = client.post(
+                "/query",
+                json={
+                    "query": "test query",
+                    "filter": {"document_id": "doc1"},
+                },
+            )
+
+            assert response.status_code == 200
+            # Verify filter was passed to query
+            call_kwargs = mock_web.query.call_args[1]
+            assert call_kwargs["filter_dict"] == {"document_id": "doc1"}
 
 
 class TestMCPServerSerialization:

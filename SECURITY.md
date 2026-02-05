@@ -10,11 +10,11 @@ We currently support the following versions with security updates:
 
 ## Reporting a Vulnerability
 
-If you discover a security vulnerability in GlueLLM, please report it responsibly.
+If you discover a security vulnerability in Spiderweb, please report it responsibly.
 
 **Please do NOT create a public GitHub issue for security vulnerabilities.**
 
-Instead, please email security concerns to: [security@example.com] (replace with actual email)
+Instead, please email security concerns to: nick@nyoung.dev
 
 Include the following information:
 - Description of the vulnerability
@@ -30,7 +30,7 @@ We will:
 
 ## Security Best Practices
 
-When using GlueLLM:
+When using Spiderweb:
 
 1. **API Keys**: Never commit API keys to version control
    - Use environment variables or `.env` files (not committed)
@@ -48,7 +48,7 @@ When using GlueLLM:
    - Encrypt stored conversation history
 
 4. **Dependencies**: Keep dependencies updated
-   - Regularly update `any-llm-sdk` and other dependencies
+   - Regularly update `gluellm` and other dependencies
    - Review dependency security advisories
 
 5. **Network**: Use secure connections
@@ -69,4 +69,4 @@ We follow responsible disclosure practices:
 - Security updates will be released promptly
 - Users will be notified through GitHub releases and security advisories
 
-Thank you for helping keep GlueLLM secure!
+Thank you for helping keep Spiderweb secure!

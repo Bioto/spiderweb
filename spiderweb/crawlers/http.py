@@ -132,6 +132,10 @@ class HttpCrawler:
         headers: dict[str, str] = {}
         if config.user_agent:
             headers["User-Agent"] = config.user_agent
+        # Merge custom headers
+        headers.update(config.headers)
+        
+        cookies = config.cookies if config.cookies else None
         
         try:
             logger.info(f"Crawling URL: {url}")
@@ -139,6 +143,7 @@ class HttpCrawler:
             async with session.get(
                 url,
                 headers=headers,
+                cookies=cookies,
                 timeout=aiohttp.ClientTimeout(total=config.timeout_seconds),
             ) as response:
                 status_code = response.status

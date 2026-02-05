@@ -246,6 +246,14 @@ class BatchConfig(BaseModel):
         default=True,
         description="Continue processing if individual documents fail",
     )
+    use_cache: bool = Field(
+        default=True,
+        description="Use ingest cache to skip unchanged files",
+    )
+    force: bool = Field(
+        default=False,
+        description="Force re-processing of all files (bypass cache)",
+    )
     save_checkpoint_interval: int = Field(
         default=100,
         ge=0,
@@ -274,7 +282,7 @@ class VectorStoreConfig(BaseModel):
     Defines connection parameters for various vector stores.
     """
 
-    provider: Literal["memory", "qdrant"] = Field(
+    provider: Literal["memory", "qdrant", "chroma"] = Field(
         default="memory",
         description="Vector store provider",
     )
@@ -455,6 +463,75 @@ class QueryExpansionConfig(BaseModel):
     )
 
 
+class RerankConfig(BaseModel):
+    """Configuration for re-ranking search results.
+
+    Re-ranking improves precision by scoring query-document relevance more
+    accurately than vector similarity alone.
+    """
+
+    enabled: bool = Field(
+        default=False,
+        description="Enable re-ranking (opt-in feature)",
+    )
+    model: Literal["cross-encoder", "cohere", "none"] = Field(
+        default="cross-encoder",
+        description="Re-ranking model: cross-encoder (local), cohere (API), or none",
+    )
+    model_name: str | None = Field(
+        default=None,
+        description="Specific model name (e.g., 'cross-encoder/ms-marco-MiniLM-L-6-v2' for cross-encoder)",
+    )
+    top_k: int | None = Field(
+        default=None,
+        description="Number of top results to return after reranking (None = return all)",
+    )
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "enabled": True,
+                "model": "cross-encoder",
+                "model_name": "cross-encoder/ms-marco-MiniLM-L-6-v2",
+                "top_k": 10,
+            }
+        }
+    )
+
+
+class HybridConfig(BaseModel):
+    """Configuration for hybrid search (BM25 + vector).
+
+    Hybrid search combines keyword-based (BM25) and semantic (vector) retrieval
+    for improved recall and precision, especially for queries with specific terms.
+    """
+
+    enabled: bool = Field(
+        default=False,
+        description="Enable hybrid search (opt-in feature)",
+    )
+    rrf_k: int = Field(
+        default=60,
+        ge=1,
+        description="RRF constant k for rank fusion (higher = less aggressive downranking)",
+    )
+    bm25_top_k_multiplier: float = Field(
+        default=2.0,
+        ge=1.0,
+        description="Multiplier for BM25 top_k (e.g., 2.0 = retrieve 2x top_k before fusion)",
+    )
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "enabled": True,
+                "rrf_k": 60,
+                "bm25_top_k_multiplier": 2.0,
+            }
+        }
+    )
+
+
 class CrawlerConfig(BaseModel):
     """Configuration for web crawling.
     
@@ -502,6 +579,10 @@ class CrawlerConfig(BaseModel):
         default=True,
         description="Respect robots.txt directives",
     )
+    use_sitemap: bool = Field(
+        default=False,
+        description="Parse sitemap.xml to discover URLs before crawling",
+    )
     
     # Content handling
     wait_for_js: bool = Field(
@@ -537,6 +618,14 @@ class CrawlerConfig(BaseModel):
     user_agent: str | None = Field(
         default=None,
         description="Custom user agent (None = use default)",
+    )
+    headers: dict[str, str] = Field(
+        default_factory=dict,
+        description="Custom HTTP headers to send with requests",
+    )
+    cookies: dict[str, str] = Field(
+        default_factory=dict,
+        description="Cookies to send with requests",
     )
     extra_config: dict[str, Any] = Field(
         default_factory=dict,

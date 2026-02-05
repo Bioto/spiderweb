@@ -73,6 +73,12 @@ console = Console()
     default="first_n_chars",
     help="Strategy for generating page summaries in progressive mode",
 )
+@click.option(
+    "--force",
+    is_flag=True,
+    default=False,
+    help="Force re-processing of all files (bypass ingest cache)",
+)
 def ingest_cmd(
     path: str,
     chunker: str,
@@ -85,6 +91,7 @@ def ingest_cmd(
     use_ocr: bool,
     progressive: bool,
     summary_strategy: str,
+    force: bool,
 ):
     """Ingest documents into the vector store.
 
@@ -117,6 +124,7 @@ def ingest_cmd(
             use_ocr,
             progressive,
             summary_strategy,
+            force,
         )
     )
 
@@ -133,6 +141,7 @@ async def _ingest(
     use_ocr: bool,
     progressive: bool,
     summary_strategy: str,
+    force: bool,
 ):
     """Async ingestion implementation."""
     path_obj = Path(path)
@@ -270,6 +279,10 @@ async def _ingest(
             console.print(f"[cyan]Ingesting directory: {path_obj}[/cyan]")
             console.print(f"  Recursive: {recursive}")
             console.print(f"  Chunker: {chunker}")
+
+            # Set force flag on batch config if provided
+            if force:
+                web.batch_processor.config.force = True
 
             with console.status("[bold cyan]Processing documents..."):
                 result = await web.ingest_directory(path_obj, recursive=recursive, show_progress=False)

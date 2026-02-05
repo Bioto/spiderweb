@@ -21,7 +21,9 @@ from spiderweb.models.config import (
     ContextWindowConfig,
     CrawlExtractionConfig,
     CrawlerConfig,
+    HybridConfig,
     QueryExpansionConfig,
+    RerankConfig,
     SearchDepthConfig,
     SearchProviderConfig,
     ValidatorConfig,
@@ -149,6 +151,27 @@ class Spiderweb:
             self.store_config.collection_name = collection
 
             logger.debug(f"Parsed Qdrant URL: host={host}, port={port}, collection={collection}")
+        elif provider == "chroma":
+            # Parse persist_directory/collection or just collection
+            if "/" in rest:
+                persist_dir, collection = rest.split("/", 1)
+            else:
+                persist_dir = None
+                collection = rest or "spiderweb_documents"
+
+            # Update store config
+            if not self.store_config:
+                self.store_config = VectorStoreConfig()
+
+            self.store_config.provider = "chroma"
+            self.store_config.collection_name = collection
+            # Store persist_directory in extra_config for now (could add to VectorStoreConfig)
+            if persist_dir:
+                if not hasattr(self.store_config, "extra_config"):
+                    self.store_config.extra_config = {}
+                self.store_config.extra_config["persist_directory"] = persist_dir
+
+            logger.debug(f"Parsed Chroma URL: persist_directory={persist_dir}, collection={collection}")
 
     @property
     def document_processor(self) -> DocumentProcessor:
@@ -252,6 +275,8 @@ class Spiderweb:
         filter_dict: dict | None = None,
         context_window: ContextWindowConfig | None = None,
         query_expansion: QueryExpansionConfig | None = None,
+        rerank_config: RerankConfig | None = None,
+        hybrid_config: HybridConfig | None = None,
     ) -> QueryResult | QueryResultWithContext:
         """Query the vector store.
 
@@ -261,6 +286,8 @@ class Spiderweb:
             filter_dict: Optional metadata filters
             context_window: Optional context window configuration for surrounding chunks
             query_expansion: Optional query expansion configuration for improved recall
+            rerank_config: Optional re-ranking configuration for improved precision
+            hybrid_config: Optional hybrid search configuration (BM25 + vector)
 
         Returns:
             Query result with matched chunks, optionally with context
@@ -273,125 +300,162 @@ class Spiderweb:
 
         import time
 
+        from spiderweb.observability.tracing import span
+
         start_time = time.time()
 
-        # Handle query expansion if enabled
-        expanded_queries = None
-        expansion_strategy = None
-        rrf_scores_list = None
-        
-        if query_expansion and query_expansion.enabled:
-            logger.info(f"Query expansion enabled with strategy: {query_expansion.strategy}")
-            
-            # Expand the query
-            expander = QueryExpander(self.llm_client, query_expansion)
-            expanded_queries = await expander.expand(query)
-            expansion_strategy = query_expansion.strategy
-            
-            logger.debug(f"Expanded into {len(expanded_queries)} queries: {expanded_queries}")
-            
-            # Search with each expanded query
-            all_query_results = []
-            for exp_query in expanded_queries:
-                # Generate embedding for this query
-                embedding_result = await self.llm_client.embed(exp_query)
-                query_embedding = embedding_result.embeddings[0]
+        with span("query", {"query": query[:100], "top_k": top_k}):
+            # Handle hybrid search if enabled (takes precedence over standard vector search)
+            if hybrid_config and hybrid_config.enabled:
+                from spiderweb.pipeline.hybrid import HybridSearcher
+
+                logger.info("Hybrid search enabled (BM25 + vector)")
+                searcher = HybridSearcher(
+                    llm_client=self.llm_client,
+                    vector_store=self.document_processor.vector_store,
+                )
+                results = await searcher.search(
+                    query,
+                    top_k=top_k,
+                    filter_dict=filter_dict,
+                    rrf_k=hybrid_config.rrf_k,
+                )
+            # Handle query expansion if enabled
+            elif query_expansion and query_expansion.enabled:
+                logger.info(f"Query expansion enabled with strategy: {query_expansion.strategy}")
                 
+                # Expand the query
+                expander = QueryExpander(self.llm_client, query_expansion)
+                expanded_queries = await expander.expand(query)
+                expansion_strategy = query_expansion.strategy
+                
+                logger.debug(f"Expanded into {len(expanded_queries)} queries: {expanded_queries}")
+                
+                # Search with each expanded query
+                all_query_results = []
+                for exp_query in expanded_queries:
+                    # Generate embedding for this query
+                    embedding_result = await self.llm_client.embed(exp_query)
+                    query_embedding = embedding_result.embeddings[0]
+                    
+                    # Search vector store
+                    results = await self.document_processor.vector_store.query(
+                        embedding=query_embedding,
+                        top_k=top_k,
+                        filter_dict=filter_dict,
+                    )
+                    all_query_results.append(results)
+                
+                # Combine results using Reciprocal Rank Fusion
+                results = reciprocal_rank_fusion(all_query_results, k=query_expansion.rrf_k)
+                
+                # Limit to top_k after fusion
+                results = results[:top_k]
+                
+            else:
+                # Standard single query path
+                # Generate query embedding
+                embedding_result = await self.llm_client.embed(query)
+                query_embedding = embedding_result.embeddings[0]
+
                 # Search vector store
                 results = await self.document_processor.vector_store.query(
                     embedding=query_embedding,
                     top_k=top_k,
                     filter_dict=filter_dict,
                 )
-                all_query_results.append(results)
-            
-            # Combine results using Reciprocal Rank Fusion
-            results = reciprocal_rank_fusion(all_query_results, k=query_expansion.rrf_k)
-            
-            # Limit to top_k after fusion
-            results = results[:top_k]
-            
-        else:
-            # Standard single query path
-            # Generate query embedding
-            embedding_result = await self.llm_client.embed(query)
-            query_embedding = embedding_result.embeddings[0]
 
-            # Search vector store
-            results = await self.document_processor.vector_store.query(
-                embedding=query_embedding,
-                top_k=top_k,
-                filter_dict=filter_dict,
-            )
+            # Apply re-ranking if enabled
+            if rerank_config and rerank_config.enabled:
+                from spiderweb.pipeline.rerank import Reranker
 
-        execution_time = time.time() - start_time
+                logger.info(f"Re-ranking enabled with model: {rerank_config.model}")
+                reranker = Reranker(
+                    llm_client=self.llm_client,
+                    model=rerank_config.model,
+                    model_name=rerank_config.model_name,
+                )
+                results = await reranker.rerank(query, results, top_k=rerank_config.top_k or top_k)
 
-        # Format results
-        chunks = []
-        scores = []
-        matched_chunks = []
+            execution_time = time.time() - start_time
 
-        for chunk, score in results:
-            chunks.append(
-                {
-                    "id": chunk.id,
-                    "content": chunk.content,
-                    "document_id": chunk.metadata.document_id,
-                    "chunk_index": chunk.metadata.chunk_index,
-                    "metadata": chunk.metadata.model_dump(),
-                }
-            )
-            scores.append(score)
-            matched_chunks.append(chunk)
+            # Record metrics
+            try:
+                from spiderweb.observability.metrics import record_query_duration
 
-        # Save RRF scores if expansion was used
-        if query_expansion and query_expansion.enabled:
-            rrf_scores_list = scores.copy()
+                record_query_duration(execution_time)
+            except Exception:
+                pass
 
-        # Retrieve context if requested
-        if context_window:
-            retriever = ContextRetriever(vector_store=self.document_processor.vector_store)
-            
-            context_by_match = await retriever.get_context_for_matches(
-                matches=matched_chunks,
-                config=context_window,
-                llm_client=self.llm_client,
-            )
+            # Format results
+            chunks = []
+            scores = []
+            matched_chunks = []
 
-            # Collect all unique context chunks
-            all_context_chunks = []
-            seen_ids = set()
-            
-            for match_context in context_by_match.values():
-                for ctx_chunk in match_context.chunks:
-                    chunk_id = ctx_chunk.chunk["id"]
-                    if chunk_id not in seen_ids:
-                        seen_ids.add(chunk_id)
-                        all_context_chunks.append(ctx_chunk.chunk)
+            for chunk, score in results:
+                chunks.append(
+                    {
+                        "id": chunk.id,
+                        "content": chunk.content,
+                        "document_id": chunk.metadata.document_id,
+                        "chunk_index": chunk.metadata.chunk_index,
+                        "metadata": chunk.metadata.model_dump(),
+                    }
+                )
+                scores.append(score)
+                matched_chunks.append(chunk)
 
-            return QueryResultWithContext(
+            # Save RRF scores if expansion was used
+            expanded_queries = None
+            expansion_strategy = None
+            rrf_scores_list = None
+            if query_expansion and query_expansion.enabled:
+                rrf_scores_list = scores.copy()
+
+            # Retrieve context if requested
+            if context_window:
+                retriever = ContextRetriever(vector_store=self.document_processor.vector_store)
+                
+                context_by_match = await retriever.get_context_for_matches(
+                    matches=matched_chunks,
+                    config=context_window,
+                    llm_client=self.llm_client,
+                )
+
+                # Collect all unique context chunks
+                all_context_chunks = []
+                seen_ids = set()
+                
+                for match_context in context_by_match.values():
+                    for ctx_chunk in match_context.chunks:
+                        chunk_id = ctx_chunk.chunk["id"]
+                        if chunk_id not in seen_ids:
+                            seen_ids.add(chunk_id)
+                            all_context_chunks.append(ctx_chunk.chunk)
+
+                return QueryResultWithContext(
+                    query=query,
+                    chunks=chunks,
+                    scores=scores,
+                    execution_time_seconds=execution_time,
+                    total_results=len(chunks),
+                    context_by_match=context_by_match,
+                    all_context_chunks=all_context_chunks,
+                    expanded_queries=expanded_queries,
+                    expansion_strategy=expansion_strategy,
+                    rrf_scores=rrf_scores_list,
+                )
+
+            return QueryResult(
                 query=query,
                 chunks=chunks,
                 scores=scores,
                 execution_time_seconds=execution_time,
                 total_results=len(chunks),
-                context_by_match=context_by_match,
-                all_context_chunks=all_context_chunks,
                 expanded_queries=expanded_queries,
                 expansion_strategy=expansion_strategy,
                 rrf_scores=rrf_scores_list,
             )
-
-        return QueryResult(
-            query=query,
-            chunks=chunks,
-            scores=scores,
-            execution_time_seconds=execution_time,
-            total_results=len(chunks),
-            expanded_queries=expanded_queries,
-            expansion_strategy=expansion_strategy,
-            rrf_scores=rrf_scores_list,
-        )
 
     async def crawl_one(
         self,
@@ -621,6 +685,28 @@ class Spiderweb:
         
         is_list = isinstance(url, list)
         urls = url if is_list else [url]
+        
+        # Discover URLs from sitemap if enabled
+        if crawler_config and crawler_config.use_sitemap:
+            from spiderweb.crawlers.sitemap import discover_sitemap_url, parse_sitemap
+            import aiohttp
+            
+            sitemap_urls = []
+            async with aiohttp.ClientSession() as session:
+                for base_url in urls:
+                    sitemap_url = discover_sitemap_url(base_url)
+                    try:
+                        discovered = await parse_sitemap(sitemap_url, session)
+                        sitemap_urls.extend(discovered)
+                        logger.info(f"Discovered {len(discovered)} URLs from sitemap: {sitemap_url}")
+                    except Exception as e:
+                        logger.warning(f"Failed to parse sitemap {sitemap_url}: {e}")
+            
+            if sitemap_urls:
+                # Merge discovered URLs with original URLs (deduplicate)
+                all_urls = list(set(urls + sitemap_urls))
+                logger.info(f"Merged {len(sitemap_urls)} sitemap URLs with {len(urls)} original URLs")
+                urls = all_urls
         
         logger.info(f"Crawling {len(urls)} URL(s) (ingest={ingest}, save_to={save_to})")
         

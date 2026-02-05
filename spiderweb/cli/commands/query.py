@@ -1,6 +1,7 @@
 """Query CLI commands."""
 
 import asyncio
+import json
 
 import click
 from gluellm import GlueLLM
@@ -92,6 +93,12 @@ console = Console()
     is_flag=True,
     help="Show expanded queries and additional details",
 )
+@click.option(
+    "--filter",
+    type=str,
+    default=None,
+    help="Metadata filter as JSON (e.g., '{\"document_id\": \"doc-123\"}' or '{\"source\": [\"file1.pdf\", \"file2.pdf\"]}')",
+)
 def query_cmd(
     query_text: str,
     store: str | None,
@@ -107,6 +114,7 @@ def query_cmd(
     expand_prompt: str | None,
     expand_num: int,
     verbose: bool,
+    filter: str | None,
 ):
     """Query the vector store.
 
@@ -142,6 +150,7 @@ def query_cmd(
     """
     asyncio.run(
         _query(
+            filter,
             query_text,
             store,
             top_k,
@@ -156,6 +165,7 @@ def query_cmd(
             expand_prompt,
             expand_num,
             verbose,
+            filter,
         )
     )
 
@@ -175,8 +185,21 @@ async def _query(
     expand_prompt: str | None,
     expand_num: int,
     verbose: bool,
+    filter: str | None,
 ):
     """Async query implementation."""
+    # Parse filter if provided
+    filter_dict = None
+    if filter:
+        try:
+            filter_dict = json.loads(filter)
+            if not isinstance(filter_dict, dict):
+                console.print("[red]Error: Filter must be a JSON object[/red]")
+                return
+        except json.JSONDecodeError as e:
+            console.print(f"[red]Error: Invalid JSON filter: {e}[/red]")
+            return
+
     # Create LLM client
     console.print("[cyan]Initializing LLM client...[/cyan]")
 
@@ -219,6 +242,7 @@ async def _query(
             result = await web.query(
                 query_text,
                 top_k=top_k,
+                filter_dict=filter_dict,
                 context_window=context_window,
                 query_expansion=query_expansion,
             )
