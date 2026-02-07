@@ -353,6 +353,7 @@ class DocumentProcessor:
         file_path: str | Path,
         store_chunks: bool = True,
         document_id: str | None = None,
+        chunker_override: "Chunker | None" = None,
     ) -> IngestionResult:
         """Process a single document through the full pipeline.
 
@@ -362,6 +363,8 @@ class DocumentProcessor:
             document_id: Optional custom document ID. If provided, this ID will be used
                 for the document and all its chunks. If not provided, the auto-generated
                 document ID from extraction will be used.
+            chunker_override: Optional chunker to use instead of self.chunker.
+                Useful for adaptive chunking where strategy is chosen per document.
 
         Returns:
             Ingestion result with statistics
@@ -414,7 +417,15 @@ class DocumentProcessor:
 
                 # 2. Chunk
                 logger.debug("Step 2/5: Chunking document")
-                chunks = self.chunker.chunk(document)
+                chunker_to_use = chunker_override if chunker_override is not None else self.chunker
+                
+                # Handle semantic chunker's async requirement
+                if hasattr(chunker_to_use, "chunk_async"):
+                    # SemanticChunker requires async operation
+                    chunks = await chunker_to_use.chunk_async(document)
+                else:
+                    # Other chunkers use sync chunk()
+                    chunks = chunker_to_use.chunk(document)
 
                 # Hook: AFTER_CHUNK
                 ctx = await self.hooks.run(HookPoint.AFTER_CHUNK, chunks, document=document, file_path=str(path))

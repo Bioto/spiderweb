@@ -1,0 +1,9 @@
+Machine learning models require large amounts of training data. The quality of the data directly impacts the model's performance. Feature engineering often matters more than the choice of algorithm.
+
+The Treaty of Westphalia established the principle of state sovereignty in 1648. Modern international law still builds on these foundations. Diplomatic immunity and territorial integrity remain core concepts.
+
+Python was first released in 1991 by Guido van Rossum. It emphasizes readability and a clear syntax. The language has become dominant in data science and automation.
+
+Climate change affects precipitation patterns and sea levels. Ecosystems are shifting poleward. Adaptation and mitigation strategies are being implemented by many governments.
+
+Each of the above paragraphs represents a distinct topic with no heading structure. A semantic chunker would split at these natural topic boundaries rather than at fixed character counts or sentence boundaries.

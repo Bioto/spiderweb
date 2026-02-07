@@ -219,6 +219,90 @@ class Spiderweb:
         """
         return await self.document_processor.process(file_path, document_id=document_id)
 
+    async def ingest_with_adaptive_chunking(
+        self,
+        file_path: str | Path,
+        document_id: str | None = None,
+        preview_max_chars: int = 4000,
+    ) -> IngestionResult:
+        """Ingest a document with adaptive chunking strategy selection.
+        
+        Uses an LLM agent to analyze the document preview and automatically
+        select the best chunking strategy, then ingests the document with that strategy.
+        
+        Args:
+            file_path: Path to the document
+            document_id: Optional custom document ID. If provided, this ID will be used
+                for the document and all its chunks (useful for linking to external systems).
+                If not provided, a UUID will be auto-generated.
+            preview_max_chars: Maximum number of characters to use for document preview
+                when selecting chunking strategy (default: 4000)
+        
+        Returns:
+            Ingestion result with statistics
+        
+        Raises:
+            ValueError: If llm_client is not provided
+            FileNotFoundError: If file doesn't exist
+            ExtractionError: If extraction fails
+        
+        Example:
+            >>> from gluellm import GlueLLM
+            >>> from spiderweb import Spiderweb
+            >>> 
+            >>> llm = GlueLLM()
+            >>> web = Spiderweb(llm_client=llm)
+            >>> result = await web.ingest_with_adaptive_chunking("document.md")
+            >>> print(f"Created {result.chunks_created} chunks")
+        """
+        if not self.llm_client:
+            raise ValueError(
+                "llm_client is required for adaptive chunking. "
+                "Provide llm_client when initializing Spiderweb."
+            )
+        
+        from pathlib import Path
+        from spiderweb.chunking_agent import choose_chunking_strategy, create_chunker_from_strategy
+        
+        path = Path(file_path)
+        
+        # 1. Load document to get preview
+        logger.info(f"Loading document preview for adaptive chunking: {path.name}")
+        document = await self.document_processor.file_loader.load(path)
+        
+        # Override document ID if provided
+        if document_id:
+            document.id = document_id
+        
+        # 2. Build preview (use markdown_content if available, otherwise raw_content)
+        preview_text = document.markdown_content[:preview_max_chars] if document.markdown_content else document.raw_content[:preview_max_chars]
+        
+        # 3. Choose chunking strategy using LLM agent
+        logger.info(f"Analyzing document to select chunking strategy: {path.name}")
+        choice = await choose_chunking_strategy(
+            llm_client=self.llm_client,
+            document_preview=preview_text,
+            file_name=path.name,
+        )
+        
+        logger.info(
+            f"Selected chunking strategy '{choice.strategy}' for {path.name}: {choice.rationale}"
+        )
+        
+        # 4. Create chunker from selected strategy
+        chunker = create_chunker_from_strategy(
+            strategy=choice.strategy,
+            base_config=self.chunker_config,
+            llm_client=self.llm_client,
+        )
+        
+        # 5. Process document with the selected chunker
+        return await self.document_processor.process(
+            file_path=file_path,
+            document_id=document_id,
+            chunker_override=chunker,
+        )
+
     async def ingest_directory(
         self,
         directory: str | Path,

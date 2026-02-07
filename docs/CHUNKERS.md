@@ -335,6 +335,81 @@ web = Spiderweb(
 
 ---
 
+## Adaptive Chunking (Automatic Strategy Selection)
+
+> Let the LLM choose the best chunking strategy for each document automatically.
+
+Instead of manually selecting a chunking strategy, you can use the adaptive chunking agent to automatically analyze each document and select the optimal strategy.
+
+### When to Use
+
+- Processing diverse document types (mix of markdown, PDFs, articles, etc.)
+- You want optimal chunking without manual configuration per document
+- You have an LLM client available for strategy selection
+
+### How It Works
+
+1. Document is loaded and a preview (first ~4000 chars) is extracted
+2. LLM agent analyzes the preview and file characteristics
+3. Agent selects the best chunking strategy with a brief rationale
+4. Document is chunked and ingested using the selected strategy
+
+### Example
+
+```python
+from spiderweb import Spiderweb
+from gluellm import GlueLLM
+
+llm = GlueLLM()
+web = Spiderweb(llm_client=llm)
+
+# Automatically selects best chunking strategy per document
+result = await web.ingest_with_adaptive_chunking("document.md")
+print(f"Created {result.chunks_created} chunks")
+print(f"Strategy used: {result.document.chunks[0].metadata.chunk_type if result.document.chunks else 'N/A'}")
+
+# Works with any document type
+result2 = await web.ingest_with_adaptive_chunking("article.txt")
+result3 = await web.ingest_with_adaptive_chunking("technical_doc.pdf")
+```
+
+### Configuration
+
+```python
+# Customize preview size (default: 4000 chars)
+result = await web.ingest_with_adaptive_chunking(
+    "document.md",
+    preview_max_chars=6000,  # Use more context for strategy selection
+)
+
+# With custom document ID
+result = await web.ingest_with_adaptive_chunking(
+    "document.md",
+    document_id="custom-id-123",
+)
+```
+
+### How Strategy Selection Works
+
+The agent considers:
+- **File extension and name** (e.g., `.md` suggests hierarchical)
+- **Document structure** (presence of headings, markdown formatting)
+- **Content type** (prose, technical docs, unstructured text)
+- **Semantic vs structural boundaries** (whether topic shifts matter more than sections)
+
+### Requirements
+
+- `llm_client` must be provided when initializing `Spiderweb`
+- Strategy selection uses a small amount of LLM tokens (typically < 500 tokens per document)
+
+### Limitations
+
+- Adds one LLM call per document for strategy selection
+- Strategy is selected based on preview, not full document (though preview is usually sufficient)
+- For batch processing many similar documents, manual strategy selection may be more efficient
+
+---
+
 ## Best Practices
 
 1. **Start with hierarchical** for most documents

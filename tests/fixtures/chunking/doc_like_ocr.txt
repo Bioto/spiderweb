@@ -1,0 +1,6 @@
+T h e   q u i c k   b r o w n   f o x
+j u m p s   o v e r   t h e   l a z y   d o g .
+S o m e   w 0 r d s   m a y   h a v e   err0rs .
+Sh0rt   l i n e s   a n d   i r r e g u l a r   s p a c i n g
+are   typ i cal   of   O C R   o u t p u t .
+N u m b e r s   l i k e   0   a n d   1   c a n   b e   c o n f u s e d   w i t h   l e t t e r s .
