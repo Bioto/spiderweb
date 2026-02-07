@@ -61,6 +61,7 @@ dependencies = [
     # Web search (free, no API key)
     "ddgs>=9.0.0",
     "pymupdf>=1.24.0",  # provides 'fitz' module (PyMuPDF); do not use PyPI package "fitz"
+    "pypdf>=6.6.2",
 ]
 
 [project.optional-dependencies]

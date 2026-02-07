@@ -65,11 +65,13 @@ from spiderweb.models.config import (
     CrawlExtractionConfig,
     CrawlerConfig,
     QueryExpansionConfig,
+    ResearchAgentConfig,
     SearchDepthConfig,
     SearchProviderConfig,
     ValidatorConfig,
     VectorStoreConfig,
 )
+from spiderweb.research.models import GoalResult, ResearchPlan, ResearchReportResult
 from spiderweb.registry import (
     ComponentRegistry,
     chunker_registry,
@@ -101,10 +103,15 @@ __all__ = [
     "VectorStoreConfig",
     "ContextWindowConfig",
     "QueryExpansionConfig",
+    "ResearchAgentConfig",
     "CrawlerConfig",
     "CrawlExtractionConfig",
     "SearchProviderConfig",
     "SearchDepthConfig",
+    # Research Agent
+    "ResearchPlan",
+    "ResearchReportResult",
+    "GoalResult",
     # Search
     "SearchProvider",
     "SearchResult",

@@ -6,7 +6,10 @@ execution, dynamic content extraction, and intelligent link following.
 
 import asyncio
 import re
+import tempfile
+from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from spiderweb.crawlers.base import Crawler, CrawlResult
 from spiderweb.crawlers.url_validation import validate_http_url
@@ -14,6 +17,56 @@ from spiderweb.models.config import CrawlerConfig
 from spiderweb.observability.logging_config import get_logger
 
 logger = get_logger(__name__)
+
+# Default User-Agent for PDF fetches; SEC.gov and similar sites require a non-empty,
+# browser-like User-Agent or they return 403 Forbidden.
+_DEFAULT_PDF_USER_AGENT = (
+    "Mozilla/5.0 (compatible; Spiderweb/1.0; research crawler; +https://github.com)"
+)
+
+
+def _is_sec_gov_url(url: str) -> bool:
+    """Return True if the URL is from SEC.gov (which requires a proper User-Agent)."""
+    try:
+        return "sec.gov" in (urlparse(url).netloc or "").lower()
+    except Exception:
+        return False
+
+
+async def _download_pdf_with_user_agent(
+    url: str,
+    user_agent: str,
+    timeout: int = 120,
+) -> str:
+    """Download PDF from URL with User-Agent to a temp file; return file:// URL.
+
+    crawl4ai's PDF strategy uses requests.get() with no headers, so SEC.gov returns
+    403. For SEC (and similar) we download ourselves then pass a file:// URL.
+    """
+    import urllib.request
+
+    def _get() -> str:
+        req = urllib.request.Request(url, headers={"User-Agent": user_agent})
+        fd, path = tempfile.mkstemp(suffix=".pdf")
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                with open(fd, "wb") as f:
+                    f.write(resp.read())
+            return path
+        except Exception:
+            Path(path).unlink(missing_ok=True)
+            raise
+
+    path = await asyncio.to_thread(_get)
+    return f"file://{path}"
+
+
+def _is_pdf_url(url: str) -> bool:
+    """Return True if the URL is likely a PDF (path or query ends with .pdf)."""
+    parsed = urlparse(url)
+    path = (parsed.path or "").rstrip("/").lower()
+    query = (parsed.query or "").lower()
+    return path.endswith(".pdf") or ".pdf" in query
 
 
 class Crawl4AICrawler:
@@ -168,9 +221,140 @@ class Crawl4AICrawler:
         
         # Build and return CrawlerRunConfig
         return CrawlerRunConfig.from_kwargs(run_config_dict)
-    
+
+    async def _crawl_pdf(self, url: str, config: CrawlerConfig) -> CrawlResult:
+        """Crawl a PDF URL using crawl4ai's PDF strategies; returns CrawlResult."""
+        try:
+            from crawl4ai import AsyncWebCrawler, CrawlerRunConfig, CacheMode
+            from crawl4ai.processors.pdf import (
+                PDFContentScrapingStrategy,
+                PDFCrawlerStrategy,
+            )
+        except ImportError as e:
+            logger.warning("crawl4ai PDF strategies not available: %s. Falling back to normal crawl.", e)
+            return await self._crawl_page(url, config)
+
+        pdf_crawler_strategy = PDFCrawlerStrategy()
+        pdf_scraping_strategy = PDFContentScrapingStrategy()
+        run_config_dict: dict[str, Any] = {
+            "page_timeout": config.timeout_seconds * 1000,
+            "cache_mode": CacheMode.BYPASS,
+            "scraping_strategy": pdf_scraping_strategy,
+            # SEC.gov and similar sites return 403 without a proper User-Agent
+            "user_agent": config.user_agent or _DEFAULT_PDF_USER_AGENT,
+        }
+        run_config_dict.update(config.extra_config)
+        run_config = CrawlerRunConfig.from_kwargs(run_config_dict)
+
+        user_agent = config.user_agent or _DEFAULT_PDF_USER_AGENT
+        crawl_url = url
+        temp_path: str | None = None
+
+        if _is_sec_gov_url(url):
+            # crawl4ai's PDF strategy uses requests.get() with no headers; SEC returns 403.
+            # Download with User-Agent ourselves and pass file:// so their strategy skips fetch.
+            try:
+                crawl_url = await _download_pdf_with_user_agent(url, user_agent)
+                temp_path = crawl_url[7:] if crawl_url.startswith("file://") else None
+                logger.info("Downloaded SEC.gov PDF to temp file for extraction")
+            except Exception as e:
+                logger.warning("SEC PDF download with User-Agent failed: %s", e)
+                return CrawlResult(
+                    url=url,
+                    content="",
+                    raw_html=None,
+                    status_code=0,
+                    success=False,
+                    error=f"Failed to download PDF (SEC requires User-Agent): {e}",
+                )
+
+        try:
+            logger.info("Crawling PDF with Crawl4AI: %s", url)
+            async with AsyncWebCrawler(crawler_strategy=pdf_crawler_strategy) as pdf_crawler:
+                result = await pdf_crawler.arun(url=crawl_url, config=run_config)
+            if temp_path:
+                try:
+                    Path(temp_path).unlink(missing_ok=True)
+                except OSError as e:
+                    logger.debug("Could not remove temp PDF %s: %s", temp_path, e)
+            markdown = result.markdown or ""
+            html = result.html or ""
+            out_content = markdown if config.extract_markdown else (markdown or html)
+            metadata: dict[str, Any] = {
+                "content_length": len(out_content),
+                "links_found": 0,
+                "success": result.success,
+            }
+            if hasattr(result, "metadata") and result.metadata:
+                metadata.update(result.metadata)
+            return CrawlResult(
+                url=url,
+                content=out_content,
+                markdown=markdown if config.extract_markdown else None,
+                raw_html=html or None,
+                status_code=200 if result.success else 500,
+                metadata=metadata,
+                links=[],
+                success=result.success,
+                error=None if result.success else "PDF crawl failed",
+            )
+        except Exception as e:
+            if temp_path:
+                try:
+                    Path(temp_path).unlink(missing_ok=True)
+                except OSError:
+                    pass
+            error_msg = f"Crawl4AI PDF error: {e}"
+            logger.error("Failed to crawl PDF %s: %s", url, error_msg, exc_info=True)
+            return CrawlResult(
+                url=url,
+                content="",
+                raw_html=None,
+                status_code=0,
+                success=False,
+                error=error_msg,
+            )
+
+    async def _crawl_page(self, url: str, config: CrawlerConfig) -> CrawlResult:
+        """Fetch a single HTML page (shared logic for non-PDF crawl)."""
+        crawler = await self._get_crawler()
+        run_config = self._build_run_config(config)
+        result = await crawler.arun(url=url, config=run_config)
+        html = result.html or ""
+        markdown = result.markdown or ""
+        links = self._extract_links(html, url)
+        if config.extract_markdown and markdown:
+            out_content = markdown
+            raw_html = html
+        else:
+            out_content = html
+            raw_html = None
+        metadata: dict[str, Any] = {
+            "content_length": len(out_content),
+            "links_found": len(links),
+            "success": result.success,
+        }
+        if raw_html is not None:
+            metadata["raw_html_length"] = len(html)
+        if hasattr(result, "metadata") and result.metadata:
+            metadata.update(result.metadata)
+        return CrawlResult(
+            url=url,
+            content=out_content,
+            markdown=markdown if config.extract_markdown else None,
+            raw_html=raw_html,
+            status_code=200 if result.success else 500,
+            metadata=metadata,
+            links=links,
+            success=result.success,
+            error=None if result.success else "Crawl failed",
+        )
+
     async def crawl(self, url: str, config: CrawlerConfig | None = None) -> CrawlResult:
-        """Fetch content from a single URL with JavaScript rendering.
+        """Fetch content from a single URL with JavaScript rendering or PDF extraction.
+        
+        For URLs that look like PDFs (path or query ends with .pdf), uses crawl4ai's
+        PDF strategies to extract text. Otherwise uses the default page crawler.
         
         Args:
             url: URL to crawl
@@ -182,61 +366,20 @@ class Crawl4AICrawler:
         if config is None:
             config = CrawlerConfig(provider="crawl4ai")
 
-        # Basic safety/validity check (scheme/host and obvious local targets).
         url = validate_http_url(url)
-        
-        crawler = await self._get_crawler()
-        
+
+        if _is_pdf_url(url):
+            return await self._crawl_pdf(url, config)
+
         try:
-            logger.info(f"Crawling URL with Crawl4AI: {url}")
-            
-            # Build crawl4ai run config from Spiderweb config
-            run_config = self._build_run_config(config)
-            
-            # Perform the crawl with proper CrawlerRunConfig
-            result = await crawler.arun(url=url, config=run_config)
-            
-            # Extract content
-            content = result.html or ""
-            markdown = result.markdown or ""
-            
-            # Extract links
-            links = self._extract_links(content, url)
-            
-            # Build metadata
-            metadata: dict[str, Any] = {
-                "content_length": len(content),
-                "markdown_length": len(markdown),
-                "links_found": len(links),
-                "success": result.success,
-            }
-            
-            # Add additional metadata from result
-            if hasattr(result, "metadata") and result.metadata:
-                metadata.update(result.metadata)
-            
-            logger.debug(
-                f"Successfully crawled {url}: {len(content)} bytes HTML, "
-                f"{len(markdown)} bytes markdown, {len(links)} links"
-            )
-            
-            return CrawlResult(
-                url=url,
-                content=content,
-                markdown=markdown if config.extract_markdown else None,
-                status_code=200 if result.success else 500,
-                metadata=metadata,
-                links=links,
-                success=result.success,
-                error=None if result.success else "Crawl failed",
-            )
-        
+            return await self._crawl_page(url, config)
         except Exception as e:
             error_msg = f"Crawl4AI error: {e}"
-            logger.error(f"Failed to crawl {url}: {error_msg}", exc_info=True)
+            logger.error("Failed to crawl %s: %s", url, error_msg, exc_info=True)
             return CrawlResult(
                 url=url,
                 content="",
+                raw_html=None,
                 status_code=0,
                 success=False,
                 error=error_msg,
@@ -259,9 +402,14 @@ class Crawl4AICrawler:
         if config is None:
             config = CrawlerConfig(provider="crawl4ai")
         
+        # Skip empty or whitespace URLs so we never call crawl("")
+        urls = [u for u in urls if (u or "").strip()]
+        if not urls:
+            return []
+
         results: list[CrawlResult] = []
         visited: set[str] = set()
-        to_crawl: list[tuple[str, int]] = [(url, 1) for url in urls]  # (url, depth)
+        to_crawl: list[tuple[str, int]] = [(u.strip(), 1) for u in urls]  # (url, depth)
         
         semaphore = asyncio.Semaphore(config.max_concurrent)
         

@@ -156,7 +156,7 @@ class HttpCrawler:
                     "headers": dict(response.headers),
                 }
                 
-                # Convert to markdown if requested
+                # Convert to markdown if requested; use it as primary content
                 markdown = None
                 if config.extract_markdown:
                     try:
@@ -172,10 +172,14 @@ class HttpCrawler:
                 
                 logger.debug(f"Successfully crawled {url}: {status_code}, {len(content)} bytes, {len(links)} links")
                 
+                # content = markdown when extracted (primary text), else raw HTML
+                out_content = markdown if markdown is not None else content
+                raw_html = content if markdown is not None else None
                 return CrawlResult(
                     url=url,
-                    content=content,
+                    content=out_content,
                     markdown=markdown,
+                    raw_html=raw_html,
                     status_code=status_code,
                     metadata=metadata,
                     links=links,

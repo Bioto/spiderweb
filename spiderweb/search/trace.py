@@ -22,6 +22,7 @@ class PageRecord:
     url: str
     summary: str | None = None  # LLM-generated or truncated summary
     crawl_result: CrawlResult | None = None  # Reference to full crawl result
+    content_path: str | None = None  # Path to on-disk markdown/content when crawl_result is cleared for memory efficiency
     source_query: str | None = None  # Which search query produced this URL
     source_position: int | None = None  # Rank in that search (1-based)
     parent_url: str | None = None  # If followed from another page; else None
@@ -109,3 +110,52 @@ class SearchCrawlTrace:
             for filtered in round_data.filtered_out:
                 urls.append(filtered.url)
         return urls
+    
+    def get_content_for_synthesis(self, max_chars_per_page: int = 4000) -> str:
+        """Get aggregated content from all crawled pages for report synthesis.
+        
+        Walks through all rounds and pages, deduplicates by URL, and returns
+        a formatted markdown string suitable for passing to report synthesis.
+        
+        Args:
+            max_chars_per_page: Maximum characters per page to include (for truncation)
+            
+        Returns:
+            Aggregated markdown string with all research content
+        """
+        seen_urls = set()
+        aggregated_parts = []
+        
+        for round_data in self.rounds:
+            for page in round_data.pages:
+                if page.url in seen_urls:
+                    # Skip duplicates, keep first occurrence
+                    continue
+                
+                seen_urls.add(page.url)
+                
+                # Build page entry
+                parts = [f"## {page.url}"]
+                
+                if page.summary:
+                    parts.append(f"\n**Summary:** {page.summary}\n")
+                
+                # Include markdown content if available
+                if page.crawl_result and page.crawl_result.markdown:
+                    content = page.crawl_result.markdown
+                    if len(content) > max_chars_per_page:
+                        content = content[:max_chars_per_page] + "\n\n[... truncated ...]"
+                    parts.append(f"\n**Content:**\n{content}\n")
+                elif page.crawl_result and page.crawl_result.content:
+                    content = page.crawl_result.content
+                    if len(content) > max_chars_per_page:
+                        content = content[:max_chars_per_page] + "\n\n[... truncated ...]"
+                    parts.append(f"\n**Content:**\n{content}\n")
+                
+                # Add source query info if available
+                if page.source_query:
+                    parts.append(f"\n*Source query: {page.source_query}*\n")
+                
+                aggregated_parts.append("\n".join(parts))
+        
+        return "\n\n---\n\n".join(aggregated_parts)

@@ -13,14 +13,17 @@ from spiderweb.models.config import CrawlerConfig
 @dataclass
 class CrawlResult:
     """Result from crawling a single URL.
-    
-    Contains the fetched content, metadata, and any discovered links
-    for follow-up crawling.
+
+    Primary text is in `content`: when markdown extraction is enabled it holds
+    the markdown; otherwise the raw HTML. Use `content` for downstream
+    processing (synthesis, extraction, etc.). When markdown was extracted,
+    `raw_html` holds the original HTML for saving or debugging.
     """
-    
+
     url: str
     content: str
     markdown: str | None = None
+    raw_html: str | None = None  # Original HTML when content was set to markdown
     status_code: int = 200
     metadata: dict[str, Any] = field(default_factory=dict)
     links: list[str] = field(default_factory=list)

@@ -1058,12 +1058,30 @@ class Spiderweb:
                 trace.add_round(round_data)
                 break
             
-            # Extract URLs
-            urls_to_crawl = [
-                r.url if isinstance(r, SearchResult) else r.get("url")
-                for r in candidates_to_crawl
-            ]
-            
+            # Extract URLs and drop candidates with empty/missing URL so crawler never sees invalid URLs
+            valid_pairs = []
+            for r in candidates_to_crawl:
+                u = (r.url if isinstance(r, SearchResult) else r.get("url")) or ""
+                u = (u or "").strip()
+                if u:
+                    valid_pairs.append((r, u))
+            candidates_to_crawl = [c for c, _ in valid_pairs]
+            urls_to_crawl = [u for _, u in valid_pairs]
+            if not urls_to_crawl:
+                logger.info("No valid URLs to crawl in this round (all empty or missing)")
+                round_data = SearchRound(
+                    query=current_query,
+                    search_results=SearchResultBatch(
+                        results=round_search_results,
+                        query=current_query,
+                        total=len(round_search_results),
+                    ),
+                    pages=[],
+                    filtered_out=round_filtered,
+                )
+                trace.add_round(round_data)
+                break
+
             # Crawl
             logger.info(f"Crawling {len(urls_to_crawl)} URLs")
             crawl_results = await web_loader.crawler.crawl_many(urls_to_crawl, crawler_config)

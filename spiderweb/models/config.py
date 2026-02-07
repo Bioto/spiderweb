@@ -830,3 +830,96 @@ class SearchDepthConfig(BaseModel):
             }
         }
     )
+
+
+class ResearchAgentConfig(BaseModel):
+    """Configuration for research agent workflows.
+
+    Controls query generation, parallel execution, and report synthesis
+    for persona-driven and goal-driven research.
+    """
+
+    num_queries: int = Field(
+        default=5,
+        ge=1,
+        le=100,
+        description="Hint for initial query count (LLM decides actual number up to max_queries)",
+    )
+    max_queries: int = Field(
+        default=50,
+        ge=1,
+        le=100,
+        description="Maximum queries the LLM may suggest per batch (initial or expansion). The LLM decides how many to use up to this limit.",
+    )
+    max_parallel_crawls: int = Field(
+        default=5,
+        ge=1,
+        le=10,
+        description="Maximum concurrent search-crawl executions per batch (caps memory use when many queries are run).",
+    )
+    max_chars_per_page_for_report: int = Field(
+        default=4000,
+        ge=100,
+        le=50000,
+        description="Maximum characters per page when aggregating for report synthesis",
+    )
+    query_generation_prompt_template: str | None = Field(
+        default=None,
+        description="Custom prompt template for query generation (overrides default)",
+    )
+    report_synthesis_prompt_template: str | None = Field(
+        default=None,
+        description="Custom prompt template for report synthesis (overrides default)",
+    )
+    max_expansion_rounds: int = Field(
+        default=3,
+        ge=0,
+        le=10,
+        description="Maximum number of expansion rounds after initial crawl. Each round runs new queries, then the LLM can suggest further queries from the newly scraped content; 0 = disable expansion.",
+    )
+    expansion_context_max_chars: int = Field(
+        default=12000,
+        ge=1000,
+        le=50000,
+        description="Maximum characters of crawled content to include when deciding on additional queries",
+    )
+    cache_dir: str | None = Field(
+        default=None,
+        description="Directory for storing crawled content during research run. If set, content is written to disk and traces are kept lightweight (crawl_result cleared). If None, all content stays in memory.",
+    )
+    cleanup_cache_after_report: bool = Field(
+        default=False,
+        description="If True and cache_dir is set, delete the session subdirectory after report synthesis (default False so callers can re-use or inspect cached content).",
+    )
+    use_batched_summarization: bool = Field(
+        default=True,
+        description="If True, final report is produced by summarizing content in page batches then synthesizing from summaries (lower memory). If False, use legacy single-pass aggregation + synthesis.",
+    )
+    summary_batch_size_pages: int = Field(
+        default=8,
+        ge=1,
+        le=50,
+        description="Number of pages per batch when use_batched_summarization is True. Each batch is summarized by the LLM; then all batch summaries are synthesized into the final report.",
+    )
+    model: str | None = Field(
+        default=None,
+        description="Override LLM model for this research run (e.g. openai:gpt-4o-mini). When None, uses global default from settings.",
+    )
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "num_queries": 5,
+                "max_queries": 50,
+                "max_parallel_crawls": 5,
+                "max_chars_per_page_for_report": 4000,
+                "max_expansion_rounds": 3,
+                "expansion_context_max_chars": 12000,
+                "cache_dir": None,
+                "cleanup_cache_after_report": False,
+                "use_batched_summarization": True,
+                "summary_batch_size_pages": 8,
+                "model": None,
+            }
+        }
+    )

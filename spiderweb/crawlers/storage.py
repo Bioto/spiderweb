@@ -107,10 +107,11 @@ class CrawlStorage:
             saved_files["markdown"] = md_file
             logger.debug(f"Saved markdown to {md_file}")
         
-        # Save HTML
-        if format in ("html", "all") and result.content:
+        # Save HTML (raw_html when we kept it, else content is the HTML)
+        html_to_save = getattr(result, "raw_html", None) or result.content
+        if format in ("html", "all") and html_to_save:
             html_file = self.output_dir / f"{base_filename}.html"
-            html_file.write_text(result.content, encoding="utf-8")
+            html_file.write_text(html_to_save, encoding="utf-8")
             saved_files["html"] = html_file
             logger.debug(f"Saved HTML to {html_file}")
         
@@ -126,6 +127,7 @@ class CrawlStorage:
                 "error": result.error,
                 "content": result.content if format == "all" else None,
                 "markdown": result.markdown,
+                "raw_html": getattr(result, "raw_html", None) if format == "all" else None,
                 "metadata": result.metadata,
                 "links": result.links[:100] if result.links else [],  # Limit links
             }

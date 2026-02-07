@@ -20,9 +20,11 @@ spiderweb --help
 | Command | Description |
 |---------|-------------|
 | `crawl` | Crawl web pages with optional ingestion |
+| `goal` | Goal-driven research with planning and execution |
 | `ingest` | Ingest documents into vector store |
 | `query` | Query the vector store |
 | `progressive-query` | Query using Progressive RAG mode |
+| `research` | Persona-driven research with parallel crawlers |
 
 ---
 
@@ -280,6 +282,185 @@ SPIDERWEB_EMBEDDING_MODEL=text-embedding-3-small
 SPIDERWEB_STORE_URL=qdrant://localhost:6333/default
 SPIDERWEB_LOG_LEVEL=INFO
 ```
+
+---
+
+## spiderweb research
+
+Research a topic using persona and instructions, then synthesize a report. Generates multiple research queries, runs them in parallel via search-crawl, aggregates results, and creates a comprehensive report.
+
+### Basic Usage
+
+```bash
+# Basic research
+spiderweb research \
+  --persona "You are a tech journalist" \
+  --instructions "Research latest AI developments in 2024"
+
+# Research with more queries and save report
+spiderweb research \
+  --persona "You are a market analyst" \
+  --instructions "Research competitor pricing strategies" \
+  --num-queries 7 \
+  --output report.md
+```
+
+### Options
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--persona TEXT` | **required** | Persona description (e.g., "You are a market analyst") |
+| `--instructions TEXT` | **required** | Research instructions |
+| `--num-queries N` | 5 | Number of research queries to generate |
+| `--max-parallel N` | 5 | Maximum concurrent search-crawl executions |
+| `--search-provider NAME` | duckduckgo | Search provider backend |
+| `--limit N` | 10 | Max search results per round |
+| `--crawl-provider NAME` | crawl4ai | Crawler backend (`crawl4ai` or `http`) |
+| `--max-rounds N` | 1 | Max search rounds per query |
+| `--crawl-per-round N` | 3 | Number of search results to crawl per round |
+| `--no-js` | - | Disable JavaScript rendering |
+| `--delay N` | 1.0 | Delay between requests (seconds) |
+| `--timeout N` | 30 | Request timeout (seconds) |
+| `--save-to PATH` | - | Directory to save crawled content |
+| `--save-format FORMAT` | all | Format for saved files |
+| `--save-trace PATH` | - | Path to save search-crawl trace files |
+| `--trace-format FORMAT` | json | Format for trace files (`json`, `markdown`, `jsonl`) |
+| `--ingest` | - | Ingest crawled content into vector store |
+| `--store URL` | - | Vector store URL |
+| `--output PATH` | - | Save report to file |
+| `--show-full` | - | Show full report in console (default: preview only) |
+
+### Progress Display
+
+The command shows step-by-step progress:
+
+1. **Query Generation**: Shows generated research queries
+2. **Parallel Crawls**: Table showing status of each query (pending → crawling → complete)
+3. **Aggregation**: Summary of aggregated content
+4. **Synthesis**: Report generation status
+5. **Results**: Report preview and summary table
+
+### Examples
+
+```bash
+# Basic research with default settings
+spiderweb research \
+  --persona "You are a tech journalist" \
+  --instructions "Research latest AI developments"
+
+# Research with more queries and deeper search
+spiderweb research \
+  --persona "You are a market analyst" \
+  --instructions "Research competitor pricing" \
+  --num-queries 7 \
+  --max-rounds 2 \
+  --crawl-per-round 5
+
+# Research and save everything
+spiderweb research \
+  --persona "You are a research analyst" \
+  --instructions "Research renewable energy trends" \
+  --num-queries 5 \
+  --output report.md \
+  --save-to ./crawled_content \
+  --save-trace ./traces
+
+# Research with ingestion
+spiderweb research \
+  --persona "You are a competitive intelligence analyst" \
+  --instructions "Research competitor features" \
+  --ingest \
+  --store qdrant://localhost:6333/research
+```
+
+---
+
+## spiderweb goal
+
+Achieve a goal by planning and executing research. Takes a goal summary, creates a research plan (queries + report focus), executes it via parallel search-crawl, and synthesizes a report.
+
+### Basic Usage
+
+```bash
+# Basic goal-driven research
+spiderweb goal "Understand competitor X's pricing in EU market"
+
+# Goal with persona and save report
+spiderweb goal "Research latest AI safety developments" \
+  --persona "You are a research analyst" \
+  --output report.md
+```
+
+### Options
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `GOAL` | **required** | Goal summary (positional argument) |
+| `--persona TEXT` | - | Optional persona to guide planning and reporting |
+| `--instructions TEXT` | - | Optional additional instructions |
+| `--max-parallel N` | 5 | Maximum concurrent search-crawl executions |
+| `--search-provider NAME` | duckduckgo | Search provider backend |
+| `--limit N` | 10 | Max search results per round |
+| `--crawl-provider NAME` | crawl4ai | Crawler backend (`crawl4ai` or `http`) |
+| `--max-rounds N` | 1 | Max search rounds per query |
+| `--crawl-per-round N` | 3 | Number of search results to crawl per round |
+| `--no-js` | - | Disable JavaScript rendering |
+| `--delay N` | 1.0 | Delay between requests (seconds) |
+| `--timeout N` | 30 | Request timeout (seconds) |
+| `--save-to PATH` | - | Directory to save crawled content |
+| `--save-format FORMAT` | all | Format for saved files |
+| `--save-trace PATH` | - | Path to save search-crawl trace files |
+| `--trace-format FORMAT` | json | Format for trace files (`json`, `markdown`, `jsonl`) |
+| `--ingest` | - | Ingest crawled content into vector store |
+| `--store URL` | - | Vector store URL |
+| `--output PATH` | - | Save report to file |
+| `--show-full` | - | Show full report in console (default: preview only) |
+
+### Progress Display
+
+The command shows step-by-step progress:
+
+1. **Plan Creation**: Shows generated plan with queries and report focus
+2. **Parallel Crawls**: Table showing status of each query (pending → crawling → complete)
+3. **Aggregation**: Summary of aggregated content
+4. **Synthesis**: Report generation status
+5. **Results**: Report preview and summary table (including plan details)
+
+### Examples
+
+```bash
+# Basic goal-driven research
+spiderweb goal "Understand competitor X's pricing and positioning in EU market"
+
+# Goal with persona
+spiderweb goal "Research latest developments in quantum computing" \
+  --persona "You are a tech journalist"
+
+# Goal with full workflow
+spiderweb goal "Analyze market trends in renewable energy" \
+  --persona "You are a market analyst" \
+  --output analysis.md \
+  --save-to ./research_data \
+  --save-trace ./traces \
+  --max-rounds 2
+
+# Goal with ingestion
+spiderweb goal "Research competitor product features" \
+  --ingest \
+  --store qdrant://localhost:6333/competitor_research
+```
+
+### When to Use Which Command
+
+**Use `research` when:**
+- You have a clear persona and research instructions
+- You want the agent to generate queries automatically
+- You prefer a straightforward research → report flow
+
+**Use `goal` when:**
+- You have a high-level goal but want the agent to plan the approach
+- You want transparency into the planning process
+- You want the agent to determine both queries and report focus
 
 ---
 

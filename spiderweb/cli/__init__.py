@@ -13,6 +13,7 @@ from spiderweb.cli.commands.ingest import ingest_cmd
 from spiderweb.cli.commands.mcp import mcp_cmd
 from spiderweb.cli.commands.progressive_query import progressive_query_cmd
 from spiderweb.cli.commands.query import query_cmd
+from spiderweb.cli.commands.research import goal_cmd, research_cmd
 from spiderweb.cli.commands.search import search_cmd
 from spiderweb._version import get_version
 
@@ -31,10 +32,12 @@ def cli():
 # Register commands
 cli.add_command(api_cmd)
 cli.add_command(crawl_cmd)
+cli.add_command(goal_cmd)
 cli.add_command(ingest_cmd)
 cli.add_command(mcp_cmd)
 cli.add_command(progressive_query_cmd)
 cli.add_command(query_cmd)
+cli.add_command(research_cmd)
 cli.add_command(search_cmd)
 
 

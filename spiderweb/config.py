@@ -62,6 +62,16 @@ class SpiderwebSettings(BaseSettings):
         default=1536,
         description="Embedding vector dimension",
     )
+    model: str | None = Field(
+        default="openai:gpt-4.1-mini-2025-04-14",
+        description="Default LLM model for chat/completion. Used by research and other LLM calls. When None, GlueLLM uses its own default.",
+    )
+    llm_timeout: float = Field(
+        default=300.0,
+        ge=1.0,
+        le=3600.0,
+        description="Timeout in seconds for LLM completion requests (e.g. research summarization). Default 300.",
+    )
 
     # Vector store settings
     default_vector_store: Literal["memory", "qdrant"] = Field(

@@ -8,6 +8,8 @@ API does not support a sort order; use timelimit to bias toward recent results.
 import asyncio
 from typing import Any
 
+from ddgs.exceptions import DDGSException
+
 from spiderweb.observability.logging_config import get_logger
 from spiderweb.search.base import SearchProvider, SearchResult, SearchResultBatch
 
@@ -56,7 +58,7 @@ class DuckDuckGoSearchProvider(SearchProvider):
             query: Search query string.
             limit: Maximum number of results to return.
             **kwargs: Optional overrides. Passed to ddgs.text() where supported:
-                region: e.g. "us-en", "uk-en" (default from constructor or "wt-wt").
+                region: e.g. "us-en", "uk-en" (default from constructor or "us-en").
                 safesearch: "on", "moderate", or "off".
                 timeout: Request timeout in seconds.
                 timelimit: Filter by recency - "d" (day), "w" (week), "m" (month), "y" (year).
@@ -77,7 +79,9 @@ class DuckDuckGoSearchProvider(SearchProvider):
             from ddgs import DDGS
 
             text_kwargs: dict[str, Any] = {
-                "region": region or "wt-wt",
+                # Use "us-en" when unspecified; "wt-wt" can cause ddgs to build invalid
+                # Wikipedia URLs (wt.wikipedia.org) when it uses the wikipedia backend.
+                "region": region or "us-en",
                 "safesearch": safesearch,
                 "max_results": limit,
                 "page": page,
@@ -98,6 +102,11 @@ class DuckDuckGoSearchProvider(SearchProvider):
                 "ddgs is not installed. "
                 "Install it with: pip install ddgs"
             ) from e
+        except DDGSException as e:
+            if "no results" in str(e).lower():
+                logger.warning("DuckDuckGo returned no results for query %r", query)
+                return SearchResultBatch(results=[], query=query, total=0)
+            raise
 
         results = []
         for i, item in enumerate(raw, 1):
