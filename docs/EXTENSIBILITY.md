@@ -22,6 +22,7 @@ All defaults continue to work out of the box. Extensions are opt-in.
 | `chunker_registry` | Document chunking strategies | hierarchical, sentence, semantic, sliding_window |
 | `crawler_registry` | Web crawling backends | http, crawl4ai |
 | `extractor_registry` | File content extraction | markitdown, ocr (optional) |
+| `chunk_addon_registry` | Chunk enrichment add-ons | facts |
 
 ### Registering a Custom Chunker
 
@@ -179,6 +180,195 @@ from spiderweb import Spiderweb
 Spiderweb.chunkers.register("my-chunker", MyChunkerClass)
 Spiderweb.crawlers.register("my-crawler", MyCrawlerClass)
 Spiderweb.extractors.register("my-extractor", MyExtractorClass)
+```
+
+---
+
+## Chunk Add-Ons
+
+Chunk add-ons run after chunking and can enrich chunks with additional data stored in `chunk.metadata.extra`. They're perfect for extracting structured information like facts, entities, or summaries that you want attached to each chunk.
+
+### Available Add-Ons
+
+| Add-On | Purpose | Output Location |
+|--------|---------|----------------|
+| `facts` | Extract factual statements from chunks | `chunk.metadata.extra["facts"]` |
+
+### Using Built-in Add-Ons
+
+Enable add-ons via `ChunkAddOnConfig`:
+
+```python
+from spiderweb import Spiderweb
+from spiderweb.models.config import ChunkAddOnConfig
+from gluellm import GlueLLM
+
+# Enable facts extraction
+config = ChunkAddOnConfig(enabled=["facts"])
+web = Spiderweb(
+    llm_client=GlueLLM(),
+    chunk_addon_config=config,
+)
+
+# Or pass list directly
+web = Spiderweb(
+    llm_client=GlueLLM(),
+    chunk_add_ons=["facts"],
+)
+
+# Ingest with facts extraction
+result = await web.ingest("document.pdf")
+
+# Facts are now in chunk.metadata.extra["facts"]
+for chunk in result.document.chunks:
+    facts = chunk.metadata.extra.get("facts", [])
+    print(f"Chunk has {len(facts)} facts")
+```
+
+### Configuring Add-On Options
+
+Some add-ons accept configuration options:
+
+```python
+from spiderweb.models.config import ChunkAddOnConfig
+
+config = ChunkAddOnConfig(
+    enabled=["facts"],
+    options={
+        "facts": {
+            "max_facts": 10,
+            "model": "gpt-4",
+        }
+    }
+)
+```
+
+### Creating a Custom Add-On
+
+Implement the `ChunkAddOn` protocol:
+
+```python
+from spiderweb.addons.base import ChunkAddOn
+from spiderweb import chunk_addon_registry
+from spiderweb.models.document import Chunk, Document
+
+class EntityExtractionAddOn:
+    """Extract named entities from chunks."""
+    
+    def __init__(self, llm_client=None, **kwargs):
+        self.llm_client = llm_client
+    
+    async def process_async(
+        self,
+        chunks: list[Chunk],
+        *,
+        document: Document | None = None,
+        **kwargs,
+    ) -> list[Chunk]:
+        """Extract entities and store in metadata.extra["entities"]."""
+        for chunk in chunks:
+            # Your entity extraction logic here
+            entities = await self._extract_entities(chunk.content)
+            chunk.metadata.extra["entities"] = entities
+        return chunks
+    
+    async def _extract_entities(self, content: str) -> list[str]:
+        # Use LLM or NER library to extract entities
+        ...
+
+# Register the add-on
+chunk_addon_registry.register("entities", EntityExtractionAddOn)
+
+# Or use a factory for complex initialization
+def create_entity_addon(llm_client=None, model="gpt-4", **kwargs):
+    return EntityExtractionAddOn(llm_client=llm_client, model=model)
+
+chunk_addon_registry.register_factory("entities", create_entity_addon)
+```
+
+### Add-On Protocol
+
+Add-ons can be synchronous or asynchronous:
+
+```python
+from spiderweb.addons.base import ChunkAddOn
+from spiderweb.models.document import Chunk, Document
+
+class MySyncAddOn:
+    """Synchronous add-on."""
+    
+    def process(
+        self,
+        chunks: list[Chunk],
+        *,
+        document: Document | None = None,
+        **kwargs,
+    ) -> list[Chunk]:
+        # Sync processing
+        for chunk in chunks:
+            chunk.metadata.extra["my_key"] = "my_value"
+        return chunks
+
+class MyAsyncAddOn:
+    """Asynchronous add-on (preferred for LLM calls)."""
+    
+    async def process_async(
+        self,
+        chunks: list[Chunk],
+        *,
+        document: Document | None = None,
+        **kwargs,
+    ) -> list[Chunk]:
+        # Async processing (e.g., LLM calls)
+        for chunk in chunks:
+            result = await self.llm_client.complete(...)
+            chunk.metadata.extra["my_key"] = result
+        return chunks
+```
+
+### Add-On Execution Order
+
+Add-ons run in the order specified in `enabled`:
+
+```python
+config = ChunkAddOnConfig(enabled=["facts", "entities", "summary"])
+# Runs: facts → entities → summary
+```
+
+### Accessing Add-On Output
+
+Add-on output is stored in `chunk.metadata.extra` under add-on-defined keys:
+
+```python
+# After ingestion with facts add-on
+result = await web.ingest("document.pdf")
+
+for chunk in result.document.chunks:
+    # Access facts
+    facts = chunk.metadata.extra.get("facts", [])
+    
+    # Access other add-on outputs
+    entities = chunk.metadata.extra.get("entities", [])
+    summary = chunk.metadata.extra.get("summary", "")
+```
+
+### Facts Add-On Details
+
+The built-in `facts` add-on extracts factual statements from each chunk:
+
+- **Output**: `chunk.metadata.extra["facts"]` - list of strings
+- **Options**:
+  - `max_facts` (int): Maximum facts per chunk (default: 10)
+  - `model` (str): LLM model to use (optional, uses default)
+- **Requires**: LLM client (GlueLLM instance)
+
+```python
+from spiderweb.models.config import ChunkAddOnConfig
+
+config = ChunkAddOnConfig(
+    enabled=["facts"],
+    options={"facts": {"max_facts": 5}}
+)
 ```
 
 ---

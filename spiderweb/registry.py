@@ -35,6 +35,7 @@ Example:
 from typing import TYPE_CHECKING, Callable, Generic, TypeVar
 
 if TYPE_CHECKING:
+    from spiderweb.addons.base import ChunkAddOn
     from spiderweb.chunkers.base import Chunker
     from spiderweb.crawlers.base import Crawler
     from spiderweb.extractors.base import Extractor
@@ -186,3 +187,4 @@ chunker_registry: ComponentRegistry["Chunker"] = ComponentRegistry("chunker")
 crawler_registry: ComponentRegistry["Crawler"] = ComponentRegistry("crawler")
 extractor_registry: ComponentRegistry["Extractor"] = ComponentRegistry("extractor")
 search_provider_registry: ComponentRegistry["SearchProvider"] = ComponentRegistry("search_provider")
+chunk_addon_registry: ComponentRegistry["ChunkAddOn"] = ComponentRegistry("chunk_addon")

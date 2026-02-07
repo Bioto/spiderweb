@@ -218,6 +218,43 @@ class ValidatorConfig(BaseModel):
     )
 
 
+class ChunkAddOnConfig(BaseModel):
+    """Configuration for chunk add-ons.
+
+    Defines which add-ons to run and their options. Add-ons run after
+    chunking and can enrich chunks with additional data stored in
+    chunk.metadata.extra.
+
+    Example:
+        # Enable facts extraction add-on
+        config = ChunkAddOnConfig(enabled=["facts"])
+
+        # Enable multiple add-ons with options
+        config = ChunkAddOnConfig(
+            enabled=["facts", "entities"],
+            options={"facts": {"max_facts": 10, "model": "gpt-4"}}
+        )
+    """
+
+    enabled: list[str] = Field(
+        default_factory=list,
+        description="List of add-on names to enable (e.g., ['facts'])",
+    )
+    options: dict[str, dict[str, Any]] = Field(
+        default_factory=dict,
+        description="Per-add-on configuration options (addon_name -> options dict)",
+    )
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "enabled": ["facts"],
+                "options": {"facts": {"max_facts": 10}},
+            }
+        }
+    )
+
+
 class BatchConfig(BaseModel):
     """Configuration for batch processing.
 

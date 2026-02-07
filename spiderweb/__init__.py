@@ -60,6 +60,7 @@ from spiderweb.crawlers.http import HttpCrawler
 from spiderweb.hooks import HookContext, HookManager, HookPoint, hooks
 from spiderweb.loaders.web_loader import WebLoader
 from spiderweb.models.config import (
+    ChunkAddOnConfig,
     ChunkerConfig,
     ContextWindowConfig,
     CrawlExtractionConfig,
@@ -74,6 +75,7 @@ from spiderweb.models.config import (
 from spiderweb.research.models import GoalResult, ResearchPlan, ResearchReportResult
 from spiderweb.registry import (
     ComponentRegistry,
+    chunk_addon_registry,
     chunker_registry,
     crawler_registry,
     extractor_registry,
@@ -99,6 +101,7 @@ __all__ = [
     "settings",
     "get_settings",
     "ChunkerConfig",
+    "ChunkAddOnConfig",
     "ValidatorConfig",
     "VectorStoreConfig",
     "ContextWindowConfig",
@@ -119,6 +122,7 @@ __all__ = [
     # Extensibility - Registries
     "ComponentRegistry",
     "chunker_registry",
+    "chunk_addon_registry",
     "crawler_registry",
     "extractor_registry",
     "search_provider_registry",

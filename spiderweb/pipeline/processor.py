@@ -19,11 +19,11 @@ if TYPE_CHECKING:
 from spiderweb.extractors.markitdown import MarkitdownExtractor
 from spiderweb.hooks import HookManager, HookPoint, hooks as global_hooks
 from spiderweb.loaders.file_loader import FileLoader
-from spiderweb.models.config import ChunkerConfig, ValidatorConfig, VectorStoreConfig
+from spiderweb.models.config import ChunkAddOnConfig, ChunkerConfig, ValidatorConfig, VectorStoreConfig
 from spiderweb.models.document import Chunk, Document, DocumentMetadata
 from spiderweb.models.result import IngestionResult
 from spiderweb.observability.logging_config import get_logger
-from spiderweb.registry import chunker_registry
+from spiderweb.registry import chunk_addon_registry, chunker_registry
 from spiderweb.stores.memory import MemoryVectorStore
 from spiderweb.validators.pipeline import ValidationPipeline
 
@@ -58,6 +58,8 @@ class DocumentProcessor:
         enable_validation: bool = True,
         enable_embedding: bool = True,
         hook_manager: HookManager | None = None,
+        chunk_add_ons: list[str] | None = None,
+        chunk_addon_config: ChunkAddOnConfig | None = None,
     ):
         """Initialize document processor.
 
@@ -73,11 +75,26 @@ class DocumentProcessor:
             enable_validation: Enable chunk validation
             enable_embedding: Enable embedding generation
             hook_manager: Optional hook manager for pipeline hooks (defaults to global hooks)
+            chunk_add_ons: List of add-on names to enable (e.g., ["facts"])
+            chunk_addon_config: Chunk add-on configuration
         """
         self.llm_client = llm_client
         self.enable_validation = enable_validation
         self.enable_embedding = enable_embedding
         self.hooks = hook_manager or global_hooks
+        
+        # Store chunk add-on configuration
+        self.chunk_add_ons = chunk_add_ons or []
+        self.chunk_addon_config = chunk_addon_config or ChunkAddOnConfig()
+        
+        # If chunk_add_ons is provided but config is not, create config from list
+        if chunk_add_ons and not chunk_addon_config:
+            self.chunk_addon_config = ChunkAddOnConfig(enabled=chunk_add_ons)
+        elif chunk_addon_config:
+            # Merge any explicitly provided add-ons with config
+            if chunk_add_ons:
+                all_enabled = set(self.chunk_addon_config.enabled) | set(chunk_add_ons)
+                self.chunk_addon_config.enabled = list(all_enabled)
 
         # Initialize components
         self.extractor = extractor or MarkitdownExtractor()
@@ -154,7 +171,8 @@ class DocumentProcessor:
             f"chunker={type(self.chunker).__name__}, "
             f"vector_store={type(self.vector_store).__name__}, "
             f"validation={enable_validation}, "
-            f"embedding={enable_embedding}"
+            f"embedding={enable_embedding}, "
+            f"add_ons={self.chunk_addon_config.enabled if self.chunk_addon_config.enabled else 'none'}"
         )
 
     def _estimate_tokens(self, text: str) -> int:
@@ -437,6 +455,12 @@ class DocumentProcessor:
                 chunks_created = len(chunks)
                 logger.info(f"Created {chunks_created} chunks from {path.name}")
 
+                # 2b. Run chunk add-ons
+                if self.chunk_addon_config.enabled:
+                    logger.debug(f"Step 2b/5: Running chunk add-ons: {self.chunk_addon_config.enabled}")
+                    chunks = await self._run_chunk_add_ons(chunks, document)
+                    document.chunks = chunks
+
                 # 3. Validate
                 chunks_validated = 0
                 chunks_rejected = 0
@@ -462,7 +486,60 @@ class DocumentProcessor:
                         warnings.append(f"Rejected {chunks_rejected} low-quality chunks")
                 else:
                     chunks_validated = len(chunks)
-                    logger.debug("Step 3/5: Skipping validation (disabled)")
+                        logger.debug("Step 3/5: Skipping validation (disabled)")
+
+    async def _run_chunk_add_ons(
+        self,
+        chunks: list[Chunk],
+        document: Document,
+    ) -> list[Chunk]:
+        """Run enabled chunk add-ons on chunks.
+        
+        Args:
+            chunks: List of chunks to process
+            document: Parent document
+            
+        Returns:
+            The same list of chunks (after mutation by add-ons)
+        """
+        if not self.chunk_addon_config.enabled:
+            return chunks
+        
+        for addon_name in self.chunk_addon_config.enabled:
+            try:
+                # Get add-on options if configured
+                addon_options = self.chunk_addon_config.options.get(addon_name, {})
+                
+                # Create add-on instance from registry
+                if addon_name not in chunk_addon_registry:
+                    logger.warning(
+                        f"Unknown chunk add-on '{addon_name}'. Available: {chunk_addon_registry.list()}"
+                    )
+                    continue
+                
+                # Create add-on instance - pass llm_client and options
+                addon_kwargs = {"llm_client": self.llm_client, **addon_options}
+                addon = chunk_addon_registry.create(addon_name, **addon_kwargs)
+                
+                # Run add-on (prefer async, fall back to sync)
+                if hasattr(addon, "process_async"):
+                    chunks = await addon.process_async(chunks, document=document)
+                elif hasattr(addon, "process"):
+                    chunks = addon.process(chunks, document=document)
+                else:
+                    logger.warning(
+                        f"Add-on '{addon_name}' does not implement process() or process_async()"
+                    )
+                    continue
+                
+                logger.debug(f"Ran add-on '{addon_name}' on {len(chunks)} chunks")
+                
+            except Exception as e:
+                logger.error(f"Error running chunk add-on '{addon_name}': {e}", exc_info=True)
+                # Continue with other add-ons even if one fails
+                continue
+        
+        return chunks
 
                 # 4. Generate embeddings
                 embedding_start = time.time()

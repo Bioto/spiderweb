@@ -17,6 +17,7 @@ from spiderweb.crawlers.base import CrawlResult
 from spiderweb.hooks import hooks as global_hooks
 from spiderweb.loaders.web_loader import WebLoader
 from spiderweb.models.config import (
+    ChunkAddOnConfig,
     ChunkerConfig,
     ContextWindowConfig,
     CrawlExtractionConfig,
@@ -86,6 +87,8 @@ class Spiderweb:
         validator_config: ValidatorConfig | None = None,
         store_config: VectorStoreConfig | None = None,
         extractor: "Extractor | None" = None,
+        chunk_add_ons: list[str] | None = None,
+        chunk_addon_config: ChunkAddOnConfig | None = None,
     ):
         """Initialize Spiderweb client.
 
@@ -96,12 +99,16 @@ class Spiderweb:
             validator_config: Validation configuration
             store_config: Vector store configuration
             extractor: Custom document extractor (defaults to MarkitdownExtractor)
+            chunk_add_ons: List of add-on names to enable (e.g., ["facts"])
+            chunk_addon_config: Chunk add-on configuration
         """
         self.llm_client = llm_client
         self.chunker_config = chunker_config
         self.validator_config = validator_config
         self.store_config = store_config
         self.extractor = extractor
+        self.chunk_add_ons = chunk_add_ons
+        self.chunk_addon_config = chunk_addon_config
 
         # Parse vector store URL if provided
         if vector_store_url:
@@ -184,6 +191,8 @@ class Spiderweb:
                 validator_config=self.validator_config,
                 store_config=self.store_config,
                 extractor=self.extractor,
+                chunk_add_ons=self.chunk_add_ons,
+                chunk_addon_config=self.chunk_addon_config,
             )
         return self._document_processor
 
@@ -837,6 +846,10 @@ class Spiderweb:
                     # and just chunk/embed/store
                     doc.chunks = self.document_processor.chunker.chunk(doc)
                     
+                    # Run chunk add-ons if enabled
+                    if self.document_processor.chunk_addon_config.enabled:
+                        doc.chunks = await self.document_processor._run_chunk_add_ons(doc.chunks, doc)
+                    
                     if self.document_processor.enable_validation and self.document_processor.validator:
                         validation_results = await self.document_processor.validator.validate_batch(doc.chunks)
                         valid_chunks = [
@@ -889,6 +902,10 @@ class Spiderweb:
                 
                 # Process through pipeline
                 doc.chunks = self.document_processor.chunker.chunk(doc)
+                
+                # Run chunk add-ons if enabled
+                if self.document_processor.chunk_addon_config.enabled:
+                    doc.chunks = await self.document_processor._run_chunk_add_ons(doc.chunks, doc)
                 
                 if self.document_processor.enable_validation and self.document_processor.validator:
                     validation_results = await self.document_processor.validator.validate_batch(doc.chunks)
@@ -1278,6 +1295,10 @@ class Spiderweb:
                         
                         # Process through pipeline
                         doc.chunks = self.document_processor.chunker.chunk(doc)
+                        
+                        # Run chunk add-ons if enabled
+                        if self.document_processor.chunk_addon_config.enabled:
+                            doc.chunks = await self.document_processor._run_chunk_add_ons(doc.chunks, doc)
                         
                         if self.document_processor.enable_validation and self.document_processor.validator:
                             validation_results = await self.document_processor.validator.validate_batch(doc.chunks)
