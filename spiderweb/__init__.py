@@ -51,6 +51,7 @@ Extensibility:
     - HookContext: Context passed to hook callbacks
 """
 
+from spiderweb.addons.langextract_addon import LangExtractAddOn
 from spiderweb.api import Spiderweb, ingest, process_directory, query
 from spiderweb.config import SpiderwebSettings, get_settings, settings
 from spiderweb.crawlers.base import Crawler, CrawlResult
@@ -65,6 +66,8 @@ from spiderweb.models.config import (
     ContextWindowConfig,
     CrawlExtractionConfig,
     CrawlerConfig,
+    GraphStoreConfig,
+    LangExtractAddOnOptions,
     QueryExpansionConfig,
     ResearchAgentConfig,
     SearchDepthConfig,
@@ -72,6 +75,8 @@ from spiderweb.models.config import (
     ValidatorConfig,
     VectorStoreConfig,
 )
+from spiderweb.models.graph import Entity, Relationship
+from spiderweb.stores.graph_base import GraphStore
 from spiderweb.research.models import GoalResult, ResearchPlan, ResearchReportResult
 from spiderweb.registry import (
     ComponentRegistry,
@@ -102,8 +107,14 @@ __all__ = [
     "get_settings",
     "ChunkerConfig",
     "ChunkAddOnConfig",
+    "LangExtractAddOn",
+    "LangExtractAddOnOptions",
     "ValidatorConfig",
     "VectorStoreConfig",
+    "GraphStoreConfig",
+    "Entity",
+    "Relationship",
+    "GraphStore",
     "ContextWindowConfig",
     "QueryExpansionConfig",
     "ResearchAgentConfig",

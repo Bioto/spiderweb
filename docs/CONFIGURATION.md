@@ -123,6 +123,33 @@ web = Spiderweb(
 
 ---
 
+## Ingest pipeline: vector + optional graph + add-ons
+
+A single ingest run can write to both a **vector store** (chunks) and an optional **graph store** (entities and relationships). Chunk add-ons (e.g. LangExtract, entity_entity_relations) run after chunking and populate document metadata; the pipeline then pushes entities and relationships to the graph store when one is configured.
+
+- **Default:** Vector store only; no graph store; no add-ons unless you enable them.
+- **Vector store:** Always used for chunk embeddings (in-memory if no URL is set).
+- **Graph store:** Optional. When `graph_store_url` is set (e.g. `neo4j://user:pass@localhost:7687`), entities from add-ons (e.g. LangExtract) and relationship triples (e.g. from `entity_entity_relations` add-on) are written to the graph store. Requires `pip install spiderweb[neo4j]`.
+- **Chunk add-ons:** Enable via `chunk_add_ons` or `ChunkAddOnConfig(enabled=[...])`. Built-in: `facts`, `langextract`, `entity_entity_relations`. For graph-backed ingest, typical order: `langextract` then `entity_entity_relations`.
+
+---
+
+## GraphStoreConfig
+
+Configuration for the graph store (e.g. Neo4j), used when `graph_store_url` is set.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `provider` | str | `neo4j` | Graph store provider |
+| `uri` | str | `bolt://localhost:7687` | Connection URI (bolt:// or neo4j://) |
+| `username` | str | `neo4j` | Authentication username |
+| `password` | str | `""` | Authentication password |
+| `database` | str | `neo4j` | Database name (Neo4j 4+) |
+
+You can pass a URL instead: `Spiderweb(..., graph_store_url="neo4j://user:pass@host:7687")`.
+
+---
+
 ## CrawlerConfig
 
 Controls web crawling behavior.

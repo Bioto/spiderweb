@@ -54,6 +54,14 @@ class IngestionResult(BaseModel):
         default_factory=list,
         description="List of warnings during processing",
     )
+    graph_entities_written: int | None = Field(
+        default=None,
+        description="Number of entities written to graph store (None if no graph store)",
+    )
+    graph_relationships_written: int | None = Field(
+        default=None,
+        description="Number of relationships written to graph store (None if no graph store)",
+    )
 
     model_config = ConfigDict(
         json_schema_extra={

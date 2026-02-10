@@ -3,6 +3,7 @@
 Provides persistent vector storage using ChromaDB.
 """
 
+import json
 from typing import Any, Literal
 
 from spiderweb.models.document import Chunk, ChunkMetadata
@@ -90,6 +91,17 @@ class ChromaVectorStore:
 
         self._initialized = True
 
+    @staticmethod
+    def _parse_extra(metadata_dict: dict[str, Any]) -> dict[str, Any]:
+        """Parse metadata.extra from Chroma metadata (stored as extra_json string)."""
+        s = metadata_dict.get("extra_json")
+        if not s:
+            return {}
+        try:
+            return json.loads(s) if isinstance(s, str) else (s if isinstance(s, dict) else {})
+        except (json.JSONDecodeError, TypeError):
+            return {}
+
     async def upsert(self, chunks: list[Chunk]) -> None:
         """Insert or update chunks.
 
@@ -134,6 +146,8 @@ class ChromaVectorStore:
                 metadata["section_title"] = chunk.metadata.section_title
             if chunk.metadata.section_level is not None:
                 metadata["section_level"] = chunk.metadata.section_level
+            if chunk.metadata.extra:
+                metadata["extra_json"] = json.dumps(chunk.metadata.extra)
             metadatas.append(metadata)
 
         # Upsert to Chroma
@@ -205,6 +219,7 @@ class ChromaVectorStore:
                     end_char=metadata_dict.get("end_char"),
                     section_title=metadata_dict.get("section_title"),
                     section_level=metadata_dict.get("section_level"),
+                    extra=self._parse_extra(metadata_dict),
                 )
 
                 # Reconstruct Chunk
@@ -291,6 +306,11 @@ class ChromaVectorStore:
                     document_id=metadata_dict.get("document_id", ""),
                     chunk_index=metadata_dict.get("chunk_index", 0),
                     chunk_type=metadata_dict.get("chunk_type", "sliding_window"),
+                    start_char=metadata_dict.get("start_char"),
+                    end_char=metadata_dict.get("end_char"),
+                    section_title=metadata_dict.get("section_title"),
+                    section_level=metadata_dict.get("section_level"),
+                    extra=self._parse_extra(metadata_dict),
                 )
 
                 chunk = Chunk(
@@ -377,6 +397,11 @@ class ChromaVectorStore:
                         document_id=metadata_dict.get("document_id", ""),
                         chunk_index=chunk_index,
                         chunk_type=metadata_dict.get("chunk_type", "sliding_window"),
+                        start_char=metadata_dict.get("start_char"),
+                        end_char=metadata_dict.get("end_char"),
+                        section_title=metadata_dict.get("section_title"),
+                        section_level=metadata_dict.get("section_level"),
+                        extra=self._parse_extra(metadata_dict),
                     )
                     chunk = Chunk(
                         id=chunk_id,
@@ -397,7 +422,12 @@ class ChromaVectorStore:
                             document_id=metadata_dict.get("document_id", ""),
                             chunk_index=metadata_dict.get("chunk_index", 0),
                             chunk_type=metadata_dict.get("chunk_type", "sliding_window"),
+                            start_char=metadata_dict.get("start_char"),
+                            end_char=metadata_dict.get("end_char"),
+                            section_title=metadata_dict.get("section_title"),
+                            section_level=metadata_dict.get("section_level"),
                             page_numbers=page_numbers,
+                            extra=self._parse_extra(metadata_dict),
                         )
                         chunk = Chunk(
                             id=chunk_id,

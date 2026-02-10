@@ -22,6 +22,7 @@ from spiderweb.models.config import (
     ContextWindowConfig,
     CrawlExtractionConfig,
     CrawlerConfig,
+    GraphStoreConfig,
     HybridConfig,
     QueryExpansionConfig,
     RerankConfig,
@@ -45,6 +46,49 @@ from spiderweb.search.writers import write_trace
 from spiderweb.utils.path_utils import sanitize_query_for_path
 
 logger = get_logger(__name__)
+
+
+def parse_graph_store_url(url: str) -> GraphStoreConfig:
+    """Parse graph store URL and return GraphStoreConfig.
+
+    Args:
+        url: URL in format "neo4j://user:password@host:7687" or "neo4j://host:7687"
+
+    Returns:
+        GraphStoreConfig for the parsed URL.
+    """
+    if "://" not in url:
+        raise ValueError(f"Invalid graph store URL format: {url}")
+
+    provider, rest = url.split("://", 1)
+    if provider not in ("neo4j", "bolt"):
+        raise ValueError(f"Unsupported graph store provider: {provider}")
+
+    username = "neo4j"
+    password = ""
+    if "@" in rest:
+        auth, host_port = rest.split("@", 1)
+        if ":" in auth:
+            username, password = auth.split(":", 1)
+        else:
+            username = auth
+    else:
+        host_port = rest
+
+    if ":" in host_port:
+        host, port_str = host_port.rsplit(":", 1)
+        port = int(port_str)
+    else:
+        host = host_port
+        port = 7687
+
+    uri = f"bolt://{host}:{port}"
+    return GraphStoreConfig(
+        provider="neo4j",
+        uri=uri,
+        username=username,
+        password=password,
+    )
 
 
 class Spiderweb:
@@ -83,9 +127,11 @@ class Spiderweb:
         self,
         llm_client: "GlueLLM | None" = None,
         vector_store_url: str | None = None,
+        graph_store_url: str | None = None,
         chunker_config: ChunkerConfig | None = None,
         validator_config: ValidatorConfig | None = None,
         store_config: VectorStoreConfig | None = None,
+        graph_store_config: GraphStoreConfig | None = None,
         extractor: "Extractor | None" = None,
         chunk_add_ons: list[str] | None = None,
         chunk_addon_config: ChunkAddOnConfig | None = None,
@@ -95,17 +141,20 @@ class Spiderweb:
         Args:
             llm_client: GlueLLM client for embeddings and LLM operations
             vector_store_url: Vector store connection URL (e.g., "qdrant://localhost:6333/my_collection")
+            graph_store_url: Graph store URL (e.g., "neo4j://user:pass@localhost:7687")
             chunker_config: Chunking configuration
             validator_config: Validation configuration
             store_config: Vector store configuration
+            graph_store_config: Graph store configuration (overridden by graph_store_url if set)
             extractor: Custom document extractor (defaults to MarkitdownExtractor)
-            chunk_add_ons: List of add-on names to enable (e.g., ["facts"])
+            chunk_add_ons: List of add-on names to enable (e.g., ["facts", "langextract"])
             chunk_addon_config: Chunk add-on configuration
         """
         self.llm_client = llm_client
         self.chunker_config = chunker_config
         self.validator_config = validator_config
         self.store_config = store_config
+        self.graph_store_config = graph_store_config
         self.extractor = extractor
         self.chunk_add_ons = chunk_add_ons
         self.chunk_addon_config = chunk_addon_config
@@ -113,6 +162,10 @@ class Spiderweb:
         # Parse vector store URL if provided
         if vector_store_url:
             self._parse_store_url(vector_store_url)
+
+        # Parse graph store URL if provided
+        if graph_store_url:
+            self._parse_graph_store_url(graph_store_url)
 
         # Initialize components (lazy)
         self._document_processor: DocumentProcessor | None = None
@@ -180,11 +233,30 @@ class Spiderweb:
 
             logger.debug(f"Parsed Chroma URL: persist_directory={persist_dir}, collection={collection}")
 
+    def _parse_graph_store_url(self, url: str) -> None:
+        """Parse graph store URL and set graph store config."""
+        self.graph_store_config = parse_graph_store_url(url)
+        logger.debug(
+            f"Parsed graph store URL: uri={self.graph_store_config.uri}, "
+            f"user={self.graph_store_config.username}"
+        )
+
     @property
     def document_processor(self) -> DocumentProcessor:
         """Get or create document processor."""
         if self._document_processor is None:
-            # Lazy initialization
+            graph_store = None
+            if self.graph_store_config:
+                try:
+                    from spiderweb.stores.neo4j import Neo4jGraphStore
+
+                    graph_store = Neo4jGraphStore.from_config(self.graph_store_config)
+                    logger.debug("Initialized Neo4j graph store for document processor")
+                except ImportError as e:
+                    raise ImportError(
+                        "Graph store is configured but the neo4j driver is not installed. "
+                        "Install with: pip install spiderweb[neo4j]"
+                    ) from e
             self._document_processor = DocumentProcessor(
                 llm_client=self.llm_client,
                 chunker_config=self.chunker_config,
@@ -193,6 +265,7 @@ class Spiderweb:
                 extractor=self.extractor,
                 chunk_add_ons=self.chunk_add_ons,
                 chunk_addon_config=self.chunk_addon_config,
+                graph_store=graph_store,
             )
         return self._document_processor
 

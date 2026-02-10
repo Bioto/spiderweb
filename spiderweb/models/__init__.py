@@ -7,9 +7,11 @@ from spiderweb.models.config import (
     ChunkAddOnConfig,
     ChunkerConfig,
     ExtractorConfig,
+    LangExtractAddOnOptions,
     ValidatorConfig,
 )
 from spiderweb.models.document import Chunk, ChunkMetadata, ChunkType, Document, DocumentMetadata
+from spiderweb.models.graph import Entity, Relationship
 
 __all__ = [
     "Document",
@@ -21,4 +23,7 @@ __all__ = [
     "ExtractorConfig",
     "ValidatorConfig",
     "ChunkAddOnConfig",
+    "LangExtractAddOnOptions",
+    "Entity",
+    "Relationship",
 ]

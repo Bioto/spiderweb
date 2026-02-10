@@ -9,6 +9,7 @@ import click
 
 from spiderweb.cli.commands.api import api_cmd
 from spiderweb.cli.commands.crawl import crawl_cmd
+from spiderweb.cli.commands.graph_query import graph_query_cmd
 from spiderweb.cli.commands.ingest import ingest_cmd
 from spiderweb.cli.commands.mcp import mcp_cmd
 from spiderweb.cli.commands.progressive_query import progressive_query_cmd
@@ -33,6 +34,7 @@ def cli():
 cli.add_command(api_cmd)
 cli.add_command(crawl_cmd)
 cli.add_command(goal_cmd)
+cli.add_command(graph_query_cmd)
 cli.add_command(ingest_cmd)
 cli.add_command(mcp_cmd)
 cli.add_command(progressive_query_cmd)

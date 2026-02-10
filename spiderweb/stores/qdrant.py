@@ -167,6 +167,8 @@ class QdrantVectorStore:
             payload["section_title"] = chunk.metadata.section_title
         if chunk.metadata.section_level is not None:
             payload["section_level"] = chunk.metadata.section_level
+        if chunk.metadata.extra:
+            payload["extra"] = chunk.metadata.extra
 
         return payload
 
@@ -189,6 +191,7 @@ class QdrantVectorStore:
             page_numbers=payload.get("page_numbers", []),
             section_title=payload.get("section_title"),
             section_level=payload.get("section_level"),
+            extra=payload.get("extra") or {},
         )
 
         return Chunk(

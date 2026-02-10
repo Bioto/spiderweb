@@ -42,6 +42,19 @@ console = Console()
     help="Vector store URL (e.g., qdrant://localhost:6333/my_collection)",
 )
 @click.option(
+    "--graph-store",
+    type=str,
+    default=None,
+    help="Graph store URL (e.g., neo4j://user:pass@localhost:7687). If omitted, graph store is disabled.",
+)
+@click.option(
+    "--chunk-add-on",
+    "chunk_add_ons",
+    type=str,
+    multiple=True,
+    help="Chunk add-on to enable (repeat for multiple). e.g. --chunk-add-on langextract --chunk-add-on entity_entity_relations",
+)
+@click.option(
     "--no-validation",
     is_flag=True,
     help="Disable chunk validation",
@@ -85,6 +98,8 @@ def ingest_cmd(
     chunk_size: int,
     chunk_overlap: int,
     store: str | None,
+    graph_store: str | None,
+    chunk_add_ons: tuple[str, ...],
     no_validation: bool,
     recursive: bool,
     embedding_model: str | None,
@@ -110,6 +125,10 @@ def ingest_cmd(
       \b
       # Ingest to Qdrant
       spiderweb ingest /path/to/docs --store qdrant://localhost:6333/my_docs
+
+      \b
+      # Ingest with graph store and entity/relationship add-ons
+      spiderweb ingest /path/to/docs --store qdrant://localhost:6333/docs --graph-store neo4j://localhost:7687 --chunk-add-on langextract --chunk-add-on entity_entity_relations
     """
     asyncio.run(
         _ingest(
@@ -118,6 +137,8 @@ def ingest_cmd(
             chunk_size,
             chunk_overlap,
             store,
+            graph_store,
+            list(chunk_add_ons),
             no_validation,
             recursive,
             embedding_model,
@@ -135,6 +156,8 @@ async def _ingest(
     chunk_size: int,
     chunk_overlap: int,
     store_url: str | None,
+    graph_store_url: str | None,
+    chunk_add_ons: list[str],
     no_validation: bool,
     recursive: bool,
     embedding_model: str | None,
@@ -193,13 +216,17 @@ async def _ingest(
         summary_web = Spiderweb(
             llm_client=llm,
             vector_store_url=summary_store_url,
+            graph_store_url=graph_store_url,
             chunker_config=chunker_config,
+            chunk_add_ons=chunk_add_ons or None,
         )
 
         full_web = Spiderweb(
             llm_client=llm,
             vector_store_url=full_store_url,
+            graph_store_url=graph_store_url,
             chunker_config=chunker_config,
+            chunk_add_ons=chunk_add_ons or None,
         )
 
         full_web.document_processor.enable_validation = not no_validation
@@ -247,8 +274,10 @@ async def _ingest(
     web = Spiderweb(
         llm_client=llm,
         vector_store_url=store_url,
+        graph_store_url=graph_store_url,
         chunker_config=chunker_config,
         extractor=extractor,
+        chunk_add_ons=chunk_add_ons or None,
     )
 
     web.document_processor.enable_validation = not no_validation
@@ -266,6 +295,10 @@ async def _ingest(
                 console.print(f"  Chunks created: {result.chunks_created}")
                 console.print(f"  Chunks validated: {result.chunks_validated}")
                 console.print(f"  Processing time: {result.processing_time_seconds:.2f}s")
+                if result.graph_entities_written is not None:
+                    console.print(f"  Graph: {result.graph_entities_written} entities, {result.graph_relationships_written or 0} relationships")
+                    if result.graph_entities_written == 0 and (result.graph_relationships_written or 0) == 0:
+                        console.print("  [dim]Tip: install spiderweb[langextract] and set API key so LangExtract can extract entities.[/dim]")
 
                 if result.warnings:
                     console.print(f"  [yellow]Warnings: {len(result.warnings)}[/yellow]")

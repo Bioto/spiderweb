@@ -69,6 +69,9 @@ pip install "spiderweb[office]"
 # OCR for scanned PDFs
 pip install "spiderweb[ocr]"
 
+# Grounded entity extraction (LangExtract) - source spans and few-shot extraction
+pip install "spiderweb[langextract]"
+
 # MCP server for AI assistants
 pip install "spiderweb[mcp]"
 
@@ -300,6 +303,45 @@ config = ChunkerConfig(strategy="sliding_window", chunk_overlap=200)
 ```
 
 See [docs/CHUNKERS.md](docs/CHUNKERS.md) for the full guide.
+
+---
+
+## LangExtract (Grounded Entity Extraction)
+
+With `pip install spiderweb[langextract]` you can run [LangExtract](https://github.com/google/langextract) as a chunk add-on: extract entities with **precise source spans** (character offsets) and optional few-shot examples. Results are stored in `document.metadata.extra["langextract"]` and, when chunks have `start_char`/`end_char`, overlapping entities are attached to each chunk's `metadata.extra["langextract_entities"]`.
+
+Set `LANGEXTRACT_API_KEY` (e.g. for Gemini) or pass `api_key` in options.
+
+```python
+from spiderweb.models.config import ChunkAddOnConfig, LangExtractAddOnOptions
+
+# Enable LangExtract add-on with prompt and few-shot examples
+opts = LangExtractAddOnOptions(
+    prompt_description="Extract people, places, and dates. Use exact text.",
+    examples=[
+        {
+            "text": "On Jan 1, Alice met Bob in Paris.",
+            "extractions": [
+                {"extraction_class": "person", "extraction_text": "Alice", "attributes": {}},
+                {"extraction_class": "person", "extraction_text": "Bob", "attributes": {}},
+                {"extraction_class": "place", "extraction_text": "Paris", "attributes": {}},
+                {"extraction_class": "date", "extraction_text": "Jan 1", "attributes": {}},
+            ],
+        },
+    ],
+    model_id="gemini-2.5-flash",
+    extraction_passes=2,  # for long documents
+)
+config = ChunkAddOnConfig(
+    enabled=["langextract"],
+    options={"langextract": opts.model_dump()},
+)
+
+async with Spiderweb(llm_client=GlueLLM(), chunk_addon_config=config) as web:
+    result = await web.ingest("report.pdf")
+    extractions = result.document.metadata.extra.get("langextract", {}).get("extractions", [])
+    print(f"Extracted {len(extractions)} entities with source grounding")
+```
 
 ---
 

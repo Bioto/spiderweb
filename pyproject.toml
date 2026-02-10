@@ -95,6 +95,16 @@ api = [
     "uvicorn[standard]>=0.32.0",
 ]
 
+# Grounded extraction (LangExtract) - entity extraction with source spans
+langextract = [
+    "langextract>=1.0.0",
+]
+
+# Graph store (Neo4j) - entities and relationships
+neo4j = [
+    "neo4j>=5.0.0",
+]
+
 # Development dependencies
 dev = [
     "pytest>=8.0.0",
@@ -107,7 +117,7 @@ dev = [
 
 # All optional features
 all = [
-    "spiderweb[pdf,office,ocr,mcp,api]",
+    "spiderweb[pdf,office,ocr,mcp,api,langextract,neo4j]",
 ]
 
 [project.urls]

@@ -30,10 +30,18 @@ Example:
 from typing import Any
 
 from spiderweb.addons.base import ChunkAddOn
+from spiderweb.addons.entity_relations_addon import EntityEntityRelationsAddOn
 from spiderweb.addons.facts import FactsAddOn
+from spiderweb.addons.langextract_addon import LangExtractAddOn
 from spiderweb.registry import chunk_addon_registry
 
-__all__ = ["ChunkAddOn", "FactsAddOn", "chunk_addon_registry"]
+__all__ = [
+    "ChunkAddOn",
+    "EntityEntityRelationsAddOn",
+    "FactsAddOn",
+    "LangExtractAddOn",
+    "chunk_addon_registry",
+]
 
 # Register built-in add-ons
 def _register_builtin_addons() -> None:
@@ -42,7 +50,20 @@ def _register_builtin_addons() -> None:
     def create_facts_addon(llm_client: Any | None = None, **kwargs: object) -> FactsAddOn:
         """Factory for creating FactsAddOn instances."""
         return FactsAddOn(llm_client=llm_client, **kwargs)
-    
+
     chunk_addon_registry.register_factory("facts", create_facts_addon)
+
+    # LangExtract add-on: optional dependency; options: prompt_description, examples, model_id, etc.
+    def create_langextract_addon(llm_client: Any | None = None, **kwargs: object) -> LangExtractAddOn:
+        """Factory for creating LangExtractAddOn instances."""
+        return LangExtractAddOn(llm_client=llm_client, **kwargs)
+
+    chunk_addon_registry.register_factory("langextract", create_langextract_addon)
+
+    def create_entity_entity_relations_addon(llm_client: Any | None = None, **kwargs: object) -> EntityEntityRelationsAddOn:
+        return EntityEntityRelationsAddOn(llm_client=llm_client, **kwargs)
+
+    chunk_addon_registry.register_factory("entity_entity_relations", create_entity_entity_relations_addon)
+
 
 _register_builtin_addons()

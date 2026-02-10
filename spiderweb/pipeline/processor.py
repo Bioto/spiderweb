@@ -14,6 +14,7 @@ if TYPE_CHECKING:
     from spiderweb.chunkers.base import Chunker
     from spiderweb.extractors.base import Extractor
     from spiderweb.stores.base import VectorStore
+    from spiderweb.stores.graph_base import GraphStore
     from spiderweb.validators.pipeline import ValidationPipeline
 
 from spiderweb.extractors.markitdown import MarkitdownExtractor
@@ -23,6 +24,7 @@ from spiderweb.models.config import ChunkAddOnConfig, ChunkerConfig, ValidatorCo
 from spiderweb.models.document import Chunk, Document, DocumentMetadata
 from spiderweb.models.result import IngestionResult
 from spiderweb.observability.logging_config import get_logger
+from spiderweb.pipeline.graph_adapter import document_to_entities_and_relationships
 from spiderweb.registry import chunk_addon_registry, chunker_registry
 from spiderweb.stores.memory import MemoryVectorStore
 from spiderweb.validators.pipeline import ValidationPipeline
@@ -60,6 +62,7 @@ class DocumentProcessor:
         hook_manager: HookManager | None = None,
         chunk_add_ons: list[str] | None = None,
         chunk_addon_config: ChunkAddOnConfig | None = None,
+        graph_store: "GraphStore | None" = None,
     ):
         """Initialize document processor.
 
@@ -77,8 +80,10 @@ class DocumentProcessor:
             hook_manager: Optional hook manager for pipeline hooks (defaults to global hooks)
             chunk_add_ons: List of add-on names to enable (e.g., ["facts"])
             chunk_addon_config: Chunk add-on configuration
+            graph_store: Optional graph store for entities and relationships (e.g. Neo4j)
         """
         self.llm_client = llm_client
+        self.graph_store = graph_store
         self.enable_validation = enable_validation
         self.enable_embedding = enable_embedding
         self.hooks = hook_manager or global_hooks
@@ -172,7 +177,8 @@ class DocumentProcessor:
             f"vector_store={type(self.vector_store).__name__}, "
             f"validation={enable_validation}, "
             f"embedding={enable_embedding}, "
-            f"add_ons={self.chunk_addon_config.enabled if self.chunk_addon_config.enabled else 'none'}"
+            f"add_ons={self.chunk_addon_config.enabled if self.chunk_addon_config.enabled else 'none'}, "
+            f"graph_store={type(self.graph_store).__name__ if self.graph_store else 'none'}"
         )
 
     def _estimate_tokens(self, text: str) -> int:
@@ -461,6 +467,25 @@ class DocumentProcessor:
                     chunks = await self._run_chunk_add_ons(chunks, document)
                     document.chunks = chunks
 
+                # 2c. Push entities and relationships to graph store (from add-on output in metadata)
+                graph_entities_written: int | None = None
+                graph_relationships_written: int | None = None
+                if self.graph_store:
+                    entities, relationships = document_to_entities_and_relationships(document)
+                    graph_entities_written = len(entities)
+                    graph_relationships_written = len(relationships)
+                    if entities:
+                        await self.graph_store.upsert_entities(entities)
+                    if relationships:
+                        await self.graph_store.upsert_relationships(relationships)
+                    if entities or relationships:
+                        logger.info(f"Graph store: upserted {len(entities)} entities, {len(relationships)} relationships")
+                    else:
+                        logger.info(
+                            "Graph store: no entities or relationships from document. "
+                            "Ensure LangExtract add-on ran (pip install spiderweb[langextract]) and produced extractions."
+                        )
+
                 # 3. Validate
                 chunks_validated = 0
                 chunks_rejected = 0
@@ -486,60 +511,7 @@ class DocumentProcessor:
                         warnings.append(f"Rejected {chunks_rejected} low-quality chunks")
                 else:
                     chunks_validated = len(chunks)
-                        logger.debug("Step 3/5: Skipping validation (disabled)")
-
-    async def _run_chunk_add_ons(
-        self,
-        chunks: list[Chunk],
-        document: Document,
-    ) -> list[Chunk]:
-        """Run enabled chunk add-ons on chunks.
-        
-        Args:
-            chunks: List of chunks to process
-            document: Parent document
-            
-        Returns:
-            The same list of chunks (after mutation by add-ons)
-        """
-        if not self.chunk_addon_config.enabled:
-            return chunks
-        
-        for addon_name in self.chunk_addon_config.enabled:
-            try:
-                # Get add-on options if configured
-                addon_options = self.chunk_addon_config.options.get(addon_name, {})
-                
-                # Create add-on instance from registry
-                if addon_name not in chunk_addon_registry:
-                    logger.warning(
-                        f"Unknown chunk add-on '{addon_name}'. Available: {chunk_addon_registry.list()}"
-                    )
-                    continue
-                
-                # Create add-on instance - pass llm_client and options
-                addon_kwargs = {"llm_client": self.llm_client, **addon_options}
-                addon = chunk_addon_registry.create(addon_name, **addon_kwargs)
-                
-                # Run add-on (prefer async, fall back to sync)
-                if hasattr(addon, "process_async"):
-                    chunks = await addon.process_async(chunks, document=document)
-                elif hasattr(addon, "process"):
-                    chunks = addon.process(chunks, document=document)
-                else:
-                    logger.warning(
-                        f"Add-on '{addon_name}' does not implement process() or process_async()"
-                    )
-                    continue
-                
-                logger.debug(f"Ran add-on '{addon_name}' on {len(chunks)} chunks")
-                
-            except Exception as e:
-                logger.error(f"Error running chunk add-on '{addon_name}': {e}", exc_info=True)
-                # Continue with other add-ons even if one fails
-                continue
-        
-        return chunks
+                    logger.debug("Step 3/5: Skipping validation (disabled)")
 
                 # 4. Generate embeddings
                 embedding_start = time.time()
@@ -582,6 +554,8 @@ class DocumentProcessor:
                     embedding_time_seconds=embedding_time,
                     errors=errors,
                     warnings=warnings,
+                    graph_entities_written=graph_entities_written,
+                    graph_relationships_written=graph_relationships_written,
                 )
 
                 logger.info(
@@ -594,7 +568,8 @@ class DocumentProcessor:
 
             except Exception as e:
                 processing_time = time.time() - start_time
-                error_msg = f"Failed to process {path.name}: {e}"
+                err_detail = str(e).strip() or repr(e)
+                error_msg = f"Failed to process {path.name}: {type(e).__name__}: {err_detail}"
                 logger.error(error_msg, exc_info=True)
                 errors.append(error_msg)
 
@@ -636,3 +611,49 @@ class DocumentProcessor:
                     errors=errors,
                     warnings=warnings,
                 )
+
+    async def _run_chunk_add_ons(
+        self,
+        chunks: list[Chunk],
+        document: Document,
+    ) -> list[Chunk]:
+        """Run enabled chunk add-ons on chunks.
+        
+        Args:
+            chunks: List of chunks to process
+            document: Parent document
+            
+        Returns:
+            The same list of chunks (after mutation by add-ons)
+        """
+        if not self.chunk_addon_config.enabled:
+            return chunks
+        
+        for addon_name in self.chunk_addon_config.enabled:
+            # Get add-on options if configured
+            addon_options = self.chunk_addon_config.options.get(addon_name, {})
+
+            # Create add-on instance from registry
+            if addon_name not in chunk_addon_registry:
+                raise ValueError(
+                    f"Unknown chunk add-on '{addon_name}'. "
+                    f"Available: {chunk_addon_registry.list()}"
+                )
+
+            # Create add-on instance - pass llm_client and options
+            addon_kwargs = {"llm_client": self.llm_client, **addon_options}
+            addon = chunk_addon_registry.create(addon_name, **addon_kwargs)
+
+            # Run add-on (prefer async, fall back to sync)
+            if hasattr(addon, "process_async"):
+                chunks = await addon.process_async(chunks, document=document)
+            elif hasattr(addon, "process"):
+                chunks = addon.process(chunks, document=document)
+            else:
+                raise ValueError(
+                    f"Add-on '{addon_name}' does not implement process() or process_async()"
+                )
+
+            logger.debug(f"Ran add-on '{addon_name}' on {len(chunks)} chunks")
+
+        return chunks

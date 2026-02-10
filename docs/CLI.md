@@ -103,6 +103,8 @@ spiderweb crawl https://example.com \
 
 Ingest documents from files or directories into the vector store.
 
+**Defaults:** If you omit `--store`, the vector store defaults to in-memory (or `SPIDERWEB_STORE_URL` if set). No graph store and no chunk add-ons are enabled unless you pass `--graph-store` and/or `--chunk-add-on`.
+
 ### Basic Usage
 
 ```bash
@@ -120,7 +122,9 @@ spiderweb ingest /path/to/docs --recursive
 | `--chunker NAME` | hierarchical | Chunking strategy (`hierarchical`, `semantic`, `sentence`) |
 | `--chunk-size N` | 1000 | Maximum chunk size in characters |
 | `--chunk-overlap N` | 200 | Overlap between chunks |
-| `--store URL` | - | Vector store URL |
+| `--store URL` | - | Vector store URL (e.g. qdrant://… or chroma://…) |
+| `--graph-store URL` | - | Graph store URL (e.g. neo4j://user:pass@localhost:7687). If omitted, graph store is disabled. |
+| `--chunk-add-on NAME` | - | Chunk add-on to enable (repeat for multiple). e.g. `langextract`, `entity_entity_relations` |
 | `--no-validation` | - | Disable chunk validation |
 | `--recursive/--no-recursive` | recursive | Process subdirectories |
 | `--embedding-model NAME` | - | Override embedding model |
@@ -148,6 +152,14 @@ spiderweb ingest large_document.pdf \
   --progressive \
   --summary-strategy llm_summary \
   --store qdrant://localhost:6333/docs
+
+# Multi-store, multi-strategy: vector + graph + entity/relationship add-ons
+# Chunks go to Qdrant; entities and relationships go to Neo4j. Run LangExtract first, then entity_entity_relations.
+spiderweb ingest /path/to/docs \
+  --store qdrant://localhost:6333/docs \
+  --graph-store neo4j://localhost:7687 \
+  --chunk-add-on langextract \
+  --chunk-add-on entity_entity_relations
 ```
 
 ---

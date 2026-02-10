@@ -255,6 +255,69 @@ class ChunkAddOnConfig(BaseModel):
     )
 
 
+class LangExtractAddOnOptions(BaseModel):
+    """Options for the LangExtract chunk add-on (source-grounded entity extraction).
+
+    Pass as ChunkAddOnConfig.options["langextract"]. Requires pip install spiderweb[langextract].
+    """
+
+    prompt_description: str = Field(
+        default="",
+        description="What to extract (e.g. 'Extract people, places, and dates'). Required.",
+    )
+    examples: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="Few-shot examples: list of {text, extractions} where extractions "
+        "are list of {extraction_class, extraction_text, attributes}.",
+    )
+    model_id: str = Field(
+        default="gpt-4.1-mini",
+        description="LangExtract model id (default gpt-4.1-mini; or gemini-2.5-flash, Ollama gemma2:2b, etc.).",
+    )
+    api_key: str | None = Field(
+        default=None,
+        description="Override LANGEXTRACT_API_KEY for this run. Not needed for local Ollama.",
+    )
+    # Local / Ollama
+    model_url: str | None = Field(
+        default=None,
+        description="Base URL for local LLM (e.g. http://localhost:11434 for Ollama). "
+        "When set, LangExtract uses the local provider instead of cloud.",
+    )
+    fence_output: bool | None = Field(
+        default=True,
+        description="LangExtract fence_output. True for OpenAI (default); set False for Ollama.",
+    )
+    use_schema_constraints: bool | None = Field(
+        default=False,
+        description="LangExtract use_schema_constraints. False for OpenAI/Ollama (default).",
+    )
+    extraction_passes: int = Field(
+        default=2,
+        ge=1,
+        le=10,
+        description="Number of extraction passes for long documents (improves recall).",
+    )
+    max_workers: int = Field(
+        default=4,
+        ge=1,
+        le=32,
+        description="Parallel workers for extraction.",
+    )
+    max_char_buffer: int | None = Field(
+        default=2000,
+        description="Max characters per chunk sent to the LLM. Required for long docs to stay under token limits (e.g. 2000 for 8k context). None = send full document (may exceed context).",
+    )
+    attach_to_chunks: bool = Field(
+        default=True,
+        description="Attach overlapping extractions to each chunk's metadata.extra.",
+    )
+    use_markdown_content: bool = Field(
+        default=True,
+        description="Use document.markdown_content instead of raw_content.",
+    )
+
+
 class BatchConfig(BaseModel):
     """Configuration for batch processing.
 
@@ -368,6 +431,35 @@ class VectorStoreConfig(BaseModel):
                 "distance_metric": "cosine",
             }
         }
+    )
+
+
+class GraphStoreConfig(BaseModel):
+    """Configuration for graph store connection (e.g. Neo4j).
+
+    Used when graph_store_url is set so the pipeline can write
+    entities and relationships from add-ons.
+    """
+
+    provider: Literal["neo4j"] = Field(
+        default="neo4j",
+        description="Graph store provider",
+    )
+    uri: str = Field(
+        default="bolt://localhost:7687",
+        description="Neo4j connection URI (bolt:// or neo4j://)",
+    )
+    username: str = Field(
+        default="neo4j",
+        description="Neo4j username",
+    )
+    password: str = Field(
+        default="",
+        description="Neo4j password",
+    )
+    database: str = Field(
+        default="neo4j",
+        description="Neo4j database name",
     )
 
 

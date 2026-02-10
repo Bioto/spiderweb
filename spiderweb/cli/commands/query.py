@@ -150,7 +150,6 @@ def query_cmd(
     """
     asyncio.run(
         _query(
-            filter,
             query_text,
             store,
             top_k,

@@ -9,7 +9,8 @@ import pytest
 
 from spiderweb.addons.base import ChunkAddOn
 from spiderweb.addons.facts import FactsAddOn, FactsResponse
-from spiderweb.models.config import ChunkAddOnConfig
+from spiderweb.addons.langextract_addon import LangExtractAddOn
+from spiderweb.models.config import ChunkAddOnConfig, LangExtractAddOnOptions
 from spiderweb.models.document import Chunk, ChunkMetadata, ChunkType, Document, DocumentMetadata
 from spiderweb.registry import chunk_addon_registry
 
@@ -86,6 +87,18 @@ class TestChunkAddOnRegistry:
         """List all registered add-ons."""
         addons = chunk_addon_registry.list()
         assert "facts" in addons
+        assert "langextract" in addons
+
+    def test_create_langextract_addon_from_registry(self):
+        """Create LangExtract add-on instance from registry."""
+        addon = chunk_addon_registry.create(
+            "langextract",
+            prompt_description="Extract entities",
+            examples=[],
+        )
+        assert isinstance(addon, LangExtractAddOn)
+        assert addon.prompt_description == "Extract entities"
+        assert addon.model_id == "gpt-4.1-mini"
 
     def test_register_custom_addon(self):
         """Register a custom add-on."""
@@ -175,7 +188,8 @@ class TestFactsAddOn:
         mock_llm = AsyncMock()
         facts_response = FactsResponse(facts=["Fact 1", "Fact 2", "Fact 3"])
 
-        with patch("spiderweb.addons.facts.structured_complete", new_callable=AsyncMock) as mock_structured:
+        # Patch where it's imported from (facts.py does "from gluellm.api import structured_complete")
+        with patch("gluellm.api.structured_complete", new_callable=AsyncMock) as mock_structured:
             mock_structured.return_value = facts_response
 
             addon = FactsAddOn(llm_client=mock_llm, max_facts=10)
@@ -193,7 +207,7 @@ class TestFactsAddOn:
         mock_llm = AsyncMock()
         facts_response = FactsResponse(facts=[f"Fact {i}" for i in range(20)])
 
-        with patch("spiderweb.addons.facts.structured_complete", new_callable=AsyncMock) as mock_structured:
+        with patch("gluellm.api.structured_complete", new_callable=AsyncMock) as mock_structured:
             mock_structured.return_value = facts_response
 
             addon = FactsAddOn(llm_client=mock_llm, max_facts=5)
@@ -418,3 +432,82 @@ class TestSpiderwebIntegration:
 
         # Verify config was created from list
         assert web.document_processor.chunk_addon_config.enabled == ["facts"]
+
+
+class TestLangExtractAddOn:
+    """Tests for LangExtractAddOn (optional langextract dependency)."""
+
+    def test_init_with_options(self):
+        """Initialize with options."""
+        addon = LangExtractAddOn(
+            prompt_description="Extract people and places",
+            examples=[{"text": "Alice met Bob.", "extractions": []}],
+            model_id="gemini-2.5-pro",
+            extraction_passes=2,
+        )
+        assert addon.prompt_description == "Extract people and places"
+        assert len(addon.examples_option) == 1
+        assert addon.model_id == "gemini-2.5-pro"
+        assert addon.extraction_passes == 2
+
+    def test_process_requires_async(self):
+        """Sync process() raises NotImplementedError."""
+        addon = LangExtractAddOn(prompt_description="Extract")
+        chunks = [_make_chunk()]
+        with pytest.raises(NotImplementedError):
+            addon.process(chunks)
+
+    @pytest.mark.asyncio
+    async def test_process_async_without_document_returns_chunks(self):
+        """Without document, process_async returns chunks unchanged."""
+        addon = LangExtractAddOn(prompt_description="Extract")
+        chunks = [_make_chunk()]
+        result = await addon.process_async(chunks, document=None)
+        assert result == chunks
+
+    @pytest.mark.asyncio
+    async def test_process_async_without_prompt_skips(self):
+        """Without prompt_description, add-on skips and returns chunks."""
+        addon = LangExtractAddOn(prompt_description="")
+        doc = _make_document("Some text.")
+        doc.chunks = [_make_chunk()]
+        chunks = doc.chunks
+        result = await addon.process_async(chunks, document=doc)
+        assert result == chunks
+        assert "langextract" not in doc.metadata.extra
+
+    @pytest.mark.asyncio
+    async def test_process_async_empty_document_skips(self):
+        """Empty document content skips extraction."""
+        addon = LangExtractAddOn(prompt_description="Extract entities")
+        doc = _make_document("")
+        doc.raw_content = ""
+        doc.markdown_content = ""
+        chunks = [_make_chunk()]
+        result = await addon.process_async(chunks, document=doc)
+        assert result == chunks
+
+
+class TestLangExtractAddOnOptions:
+    """Tests for LangExtractAddOnOptions config model."""
+
+    def test_defaults(self):
+        """Default options are sensible."""
+        opts = LangExtractAddOnOptions()
+        assert opts.prompt_description == ""
+        assert opts.model_id == "gpt-4.1-mini"
+        assert opts.extraction_passes == 2
+        assert opts.max_char_buffer == 2000
+        assert opts.attach_to_chunks is True
+
+    def test_model_dump_for_registry(self):
+        """Options can be dumped for ChunkAddOnConfig.options."""
+        opts = LangExtractAddOnOptions(
+            prompt_description="Extract dates",
+            examples=[{"text": "On Jan 1.", "extractions": []}],
+        )
+        d = opts.model_dump()
+        assert d["prompt_description"] == "Extract dates"
+        assert len(d["examples"]) == 1
+        addon = chunk_addon_registry.create("langextract", **d)
+        assert addon.prompt_description == "Extract dates"

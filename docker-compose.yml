@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   # Spiderweb main application
   spiderweb:
@@ -13,11 +11,15 @@ services:
       # Spiderweb settings
       - SPIDERWEB_LOG_LEVEL=${SPIDERWEB_LOG_LEVEL:-INFO}
       - SPIDERWEB_EMBEDDING_MODEL=${SPIDERWEB_EMBEDDING_MODEL:-openai:text-embedding-3-small}
+      # Vector store URL (default: Qdrant in this stack). Use chroma://collection for Chroma.
+      - SPIDERWEB_STORE_URL=${SPIDERWEB_STORE_URL:-qdrant://qdrant:6333/spiderweb_documents}
+      # Optional graph store URL (when using neo4j profile: neo4j://neo4j:spiderweb@neo4j:7687).
+      - SPIDERWEB_GRAPH_STORE_URL=${SPIDERWEB_GRAPH_STORE_URL:-}
       
       # Playwright settings (browsers pre-installed in root cache)
       - PLAYWRIGHT_BROWSERS_PATH=/root/.cache/ms-playwright
     volumes:
-      - ./logs:/app/logs
+      - spiderweb_logs:/app/logs
       - ./data:/app/data
       - ./examples:/app/examples
     depends_on:
@@ -27,7 +29,7 @@ services:
     networks:
       - spiderweb-network
 
-  # Qdrant vector database
+  # Qdrant vector database (default vector store)
   qdrant:
     image: qdrant/qdrant:latest
     container_name: spiderweb-qdrant
@@ -42,8 +44,53 @@ services:
       - spiderweb-network
     restart: unless-stopped
 
+  # Neo4j graph database (optional; for --graph-store and entity/relationship ingest)
+  neo4j:
+    image: neo4j:5
+    container_name: spiderweb-neo4j
+    ports:
+      - "7474:7474"   # HTTP
+      - "7687:7687"   # Bolt
+    volumes:
+      - neo4j_data:/data
+    environment:
+      - NEO4J_AUTH=${NEO4J_AUTH:-neo4j/spiderweb}
+      - NEO4J_PLUGINS='["apoc"]'
+      # Neo4j 5: listen on all interfaces; DISABLED = plain Bolt only (no TLS, for dev)
+      - NEO4J_server_bolt_listen__address=0.0.0.0:7687
+      - NEO4J_server_bolt_tls__level=DISABLED
+    networks:
+      - spiderweb-network
+    restart: unless-stopped
+    profiles:
+      - graph   # Start with: docker-compose --profile graph up
+
+  # Chroma vector database (optional alternative to Qdrant)
+  chroma:
+    image: chromadb/chroma:latest
+    container_name: spiderweb-chroma
+    ports:
+      - "8000:8000"
+    volumes:
+      - chroma_data:/chroma/chroma
+    environment:
+      - IS_PERSISTENT=TRUE
+      - PERSIST_DIRECTORY=/chroma/chroma
+      - ANONYMIZED_TELEMETRY=FALSE
+    networks:
+      - spiderweb-network
+    restart: unless-stopped
+    profiles:
+      - chroma   # Start with: docker-compose --profile chroma up
+
 volumes:
   qdrant_storage:
+    driver: local
+  spiderweb_logs:
+    driver: local
+  neo4j_data:
+    driver: local
+  chroma_data:
     driver: local
 
 networks:
