@@ -37,47 +37,58 @@ class BM25Index:
         self._k1 = 1.5  # BM25 parameter
         self._b = 0.75  # BM25 parameter
         self._avg_doc_length = 0.0
+        self._total_token_count = 0  # used for incremental _avg_doc_length
 
         if chunks:
             self._build_index()
 
     def add_chunks(self, chunks: list["Chunk"]) -> None:
-        """Add chunks to the index.
+        """Add chunks to the index incrementally (O(new_chunks), no full rebuild).
 
-        Args:
-            chunks: Chunks to add
+        Updates the inverted index and document frequencies for the new chunks only.
+        A full rebuild is only done on initial construction when chunks are passed to __init__.
         """
+        if not chunks:
+            return
         start_idx = len(self._chunks)
         self._chunks.extend(chunks)
-        self._build_index()
 
-    def _build_index(self) -> None:
-        """Build the inverted index from chunks."""
-        import re
-
-        self._index = {}
-        self._doc_freqs = {}
-        total_length = 0
-
-        for idx, chunk in enumerate(self._chunks):
-            # Tokenize chunk content
+        for i, chunk in enumerate(chunks):
+            idx = start_idx + i
             tokens = self._tokenize(chunk.content)
-            total_length += len(tokens)
-
-            # Track term positions
-            seen_in_doc = set()
+            self._total_token_count += len(tokens)
+            seen_in_doc: set[str] = set()
             for token in tokens:
                 if token not in self._index:
                     self._index[token] = []
                 self._index[token].append(idx)
-
                 if token not in seen_in_doc:
                     seen_in_doc.add(token)
                     self._doc_freqs[token] = self._doc_freqs.get(token, 0) + 1
 
-        # Calculate average document length
         if self._chunks:
-            self._avg_doc_length = total_length / len(self._chunks)
+            self._avg_doc_length = self._total_token_count / len(self._chunks)
+
+    def _build_index(self) -> None:
+        """Build the inverted index from all chunks (used only on initial construction)."""
+        self._index = {}
+        self._doc_freqs = {}
+        self._total_token_count = 0
+
+        for idx, chunk in enumerate(self._chunks):
+            tokens = self._tokenize(chunk.content)
+            self._total_token_count += len(tokens)
+            seen_in_doc: set[str] = set()
+            for token in tokens:
+                if token not in self._index:
+                    self._index[token] = []
+                self._index[token].append(idx)
+                if token not in seen_in_doc:
+                    seen_in_doc.add(token)
+                    self._doc_freqs[token] = self._doc_freqs.get(token, 0) + 1
+
+        if self._chunks:
+            self._avg_doc_length = self._total_token_count / len(self._chunks)
 
     def _tokenize(self, text: str) -> list[str]:
         """Tokenize text into terms.

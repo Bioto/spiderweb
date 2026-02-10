@@ -105,6 +105,11 @@ neo4j = [
     "neo4j>=5.0.0",
 ]
 
+# Accurate token counting for embedding batch sizing
+tokenizer = [
+    "tiktoken>=0.5.0",
+]
+
 # Development dependencies
 dev = [
     "pytest>=8.0.0",
@@ -117,7 +122,7 @@ dev = [
 
 # All optional features
 all = [
-    "spiderweb[pdf,office,ocr,mcp,api,langextract,neo4j]",
+    "spiderweb[pdf,office,ocr,mcp,api,langextract,neo4j,tokenizer]",
 ]
 
 [project.urls]

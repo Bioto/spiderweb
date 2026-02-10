@@ -366,8 +366,11 @@ class TestDocumentProcessorIntegration:
         from spiderweb.pipeline.processor import DocumentProcessor
         from spiderweb.models.config import ChunkerConfig
 
-        # Register a failing add-on
+        # Register a failing add-on (accept **kwargs so registry.create() can pass llm_client etc.)
         class FailingAddOn:
+            def __init__(self, **kwargs):
+                pass
+
             async def process_async(self, chunks, **kwargs):
                 raise Exception("Add-on error")
 

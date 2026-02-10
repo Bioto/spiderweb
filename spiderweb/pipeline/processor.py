@@ -181,10 +181,28 @@ class DocumentProcessor:
             f"graph_store={type(self.graph_store).__name__ if self.graph_store else 'none'}"
         )
 
+    def _get_tiktoken_encoding(self):
+        """Return tiktoken encoding for the current embedding model, or None if unavailable."""
+        try:
+            import tiktoken
+        except ImportError:
+            return None
+        model = getattr(self.llm_client, "embedding_model", None) if self.llm_client else None
+        if not isinstance(model, str):
+            model = ""
+        # OpenAI embedding models use cl100k_base; other providers may vary
+        if "text-embedding-3" in model or "text-embedding-ada" in model or "embedding" in model.lower():
+            try:
+                return tiktoken.encoding_for_model("gpt-4")  # cl100k_base
+            except Exception:
+                return tiktoken.get_encoding("cl100k_base")
+        return None
+
     def _estimate_tokens(self, text: str) -> int:
         """Estimate token count for text.
 
-        Uses a simple heuristic: ~4 characters per token on average.
+        Uses tiktoken when available and the embedding model is known (OpenAI-style);
+        otherwise falls back to ~4 characters per token.
 
         Args:
             text: Text to estimate
@@ -192,6 +210,12 @@ class DocumentProcessor:
         Returns:
             Estimated token count
         """
+        enc = self._get_tiktoken_encoding()
+        if enc is not None:
+            try:
+                return len(enc.encode(text))
+            except Exception:
+                pass
         return len(text) // 4
 
     def _create_embedding_batches(self, chunks: list[Chunk]) -> list[list[Chunk]]:
@@ -372,6 +396,240 @@ class DocumentProcessor:
             warnings=[reason],
         )
 
+    def _create_skipped_result_for_document(
+        self,
+        document: Document,
+        start_time: float,
+        reason: str,
+    ) -> IngestionResult:
+        """Create an IngestionResult for a skipped document (already loaded).
+
+        Args:
+            document: The document that was skipped
+            start_time: Processing start time
+            reason: Reason for skipping
+
+        Returns:
+            IngestionResult with success=True but no chunks
+        """
+        processing_time = time.time() - start_time
+        return IngestionResult(
+            document=document,
+            success=True,
+            chunks_created=0,
+            chunks_validated=0,
+            chunks_rejected=0,
+            processing_time_seconds=processing_time,
+            embedding_time_seconds=0.0,
+            errors=[],
+            warnings=[reason],
+        )
+
+    async def _run_pipeline_from_document(
+        self,
+        document: Document,
+        store_chunks: bool,
+        chunker_override: "Chunker | None",
+        source_label: str,
+    ) -> IngestionResult:
+        """Run the pipeline from chunking through store on an already-loaded document.
+
+        Used by process() after loading and by process_document() for crawl/ingest
+        and search_crawl_extract ingest paths. Runs BEFORE_CHUNK through store.
+        """
+        start_time = time.time()
+        errors: list[str] = []
+        warnings: list[str] = []
+
+        try:
+            # Hook: BEFORE_CHUNK
+            ctx = await self.hooks.run(
+                HookPoint.BEFORE_CHUNK, document, file_path=source_label
+            )
+            if ctx.skip:
+                logger.info(f"Chunking skipped by hook for {source_label}")
+                return self._create_skipped_result_for_document(
+                    document, start_time, "Skipped by BEFORE_CHUNK hook"
+                )
+            if ctx.modified_data is not None:
+                document = ctx.modified_data
+
+            # Chunk
+            logger.debug("Step 2/5: Chunking document")
+            chunker_to_use = chunker_override if chunker_override is not None else self.chunker
+            if hasattr(chunker_to_use, "chunk_async"):
+                chunks = await chunker_to_use.chunk_async(document)
+            else:
+                chunks = chunker_to_use.chunk(document)
+
+            # Hook: AFTER_CHUNK
+            ctx = await self.hooks.run(
+                HookPoint.AFTER_CHUNK, chunks, document=document, file_path=source_label
+            )
+            if ctx.modified_data is not None:
+                chunks = ctx.modified_data
+
+            document.chunks = chunks
+            chunks_created = len(chunks)
+            logger.info(f"Created {chunks_created} chunks from {source_label}")
+
+            # Run chunk add-ons
+            if self.chunk_addon_config.enabled:
+                logger.debug(
+                    f"Step 2b/5: Running chunk add-ons: {self.chunk_addon_config.enabled}"
+                )
+                chunks = await self._run_chunk_add_ons(chunks, document)
+                document.chunks = chunks
+
+            # Graph store
+            graph_entities_written: int | None = None
+            graph_relationships_written: int | None = None
+            if self.graph_store:
+                entities, relationships = document_to_entities_and_relationships(
+                    document
+                )
+                graph_entities_written = len(entities)
+                graph_relationships_written = len(relationships)
+                if entities:
+                    await self.graph_store.upsert_entities(entities)
+                if relationships:
+                    await self.graph_store.upsert_relationships(relationships)
+                if entities or relationships:
+                    logger.info(
+                        f"Graph store: upserted {len(entities)} entities, "
+                        f"{len(relationships)} relationships"
+                    )
+                else:
+                    logger.info(
+                        "Graph store: no entities or relationships from document. "
+                        "Ensure LangExtract add-on ran (pip install spiderweb[langextract])."
+                    )
+
+            # Validate
+            chunks_validated = 0
+            chunks_rejected = 0
+            if self.enable_validation and self.validator:
+                logger.debug(f"Step 3/5: Validating {len(chunks)} chunks")
+                validation_results = await self.validator.validate_batch(chunks)
+                valid_chunks = []
+                for chunk, result in zip(chunks, validation_results, strict=True):
+                    if result.passed:
+                        valid_chunks.append(chunk)
+                        chunks_validated += 1
+                    else:
+                        chunks_rejected += 1
+                        logger.debug(f"Rejected chunk {chunk.id}: {result.issues}")
+                chunks = valid_chunks
+                document.chunks = chunks
+                if chunks_rejected > 0:
+                    warnings.append(f"Rejected {chunks_rejected} low-quality chunks")
+            else:
+                chunks_validated = len(chunks)
+                logger.debug("Step 3/5: Skipping validation (disabled)")
+
+            # Embed
+            embedding_start = time.time()
+            if self.enable_embedding and self.llm_client:
+                logger.debug(
+                    f"Step 4/5: Generating embeddings for {len(chunks)} chunks"
+                )
+                chunks = await self._generate_embeddings(chunks)
+                document.chunks = chunks
+            else:
+                logger.debug(
+                    "Step 4/5: Skipping embedding generation (disabled or no LLM client)"
+                )
+            embedding_time = time.time() - embedding_start
+
+            # Store
+            if store_chunks and chunks:
+                logger.debug(f"Step 5/5: Storing {len(chunks)} chunks in vector store")
+                chunks_with_embeddings = [
+                    c for c in chunks if c.embedding is not None
+                ]
+                if chunks_with_embeddings:
+                    await self.vector_store.upsert(chunks_with_embeddings)
+                    logger.info(
+                        f"Stored {len(chunks_with_embeddings)} chunks in vector store"
+                    )
+                elif self.enable_embedding:
+                    warnings.append("No chunks with embeddings to store")
+            else:
+                logger.debug("Step 5/5: Skipping vector store (disabled or no chunks)")
+
+            processing_time = time.time() - start_time
+            return IngestionResult(
+                document=document,
+                success=True,
+                chunks_created=chunks_created,
+                chunks_validated=chunks_validated,
+                chunks_rejected=chunks_rejected,
+                chunks_deduplicated=0,
+                processing_time_seconds=processing_time,
+                embedding_time_seconds=embedding_time,
+                errors=errors,
+                warnings=warnings,
+                graph_entities_written=graph_entities_written,
+                graph_relationships_written=graph_relationships_written,
+            )
+
+        except Exception as e:
+            processing_time = time.time() - start_time
+            err_detail = str(e).strip() or repr(e)
+            error_msg = (
+                f"Failed to process {source_label}: {type(e).__name__}: {err_detail}"
+            )
+            logger.error(error_msg, exc_info=True)
+            errors.append(error_msg)
+            try:
+                from spiderweb.observability.metrics import (
+                    increment_documents_processed,
+                    record_ingest_duration,
+                )
+                record_ingest_duration(processing_time, success=False)
+                increment_documents_processed(1, success=False)
+            except Exception:
+                pass
+            return IngestionResult(
+                document=document,
+                success=False,
+                chunks_created=0,
+                chunks_validated=0,
+                chunks_rejected=0,
+                processing_time_seconds=processing_time,
+                embedding_time_seconds=0.0,
+                errors=errors,
+                warnings=warnings,
+            )
+
+    async def process_document(
+        self,
+        document: Document,
+        store_chunks: bool = True,
+        chunker_override: "Chunker | None" = None,
+    ) -> IngestionResult:
+        """Process an already-loaded document through chunking, validation, embedding, and storage.
+
+        Use this when the document was loaded elsewhere (e.g. WebLoader) so the
+        pipeline runs from chunking onward. Hooks BEFORE_CHUNK and AFTER_CHUNK
+        are run; BEFORE_EXTRACT and AFTER_EXTRACT are not.
+
+        Args:
+            document: Loaded document (e.g. from WebLoader.load).
+            store_chunks: Whether to store chunks in the vector store.
+            chunker_override: Optional chunker to use instead of self.chunker.
+
+        Returns:
+            Ingestion result with statistics.
+        """
+        source_label = document.metadata.source
+        return await self._run_pipeline_from_document(
+            document,
+            store_chunks=store_chunks,
+            chunker_override=chunker_override,
+            source_label=source_label,
+        )
+
     async def process(
         self,
         file_path: str | Path,
@@ -431,140 +689,12 @@ class DocumentProcessor:
                 if ctx.modified_data is not None:
                     document = ctx.modified_data
 
-                # Hook: BEFORE_CHUNK
-                ctx = await self.hooks.run(HookPoint.BEFORE_CHUNK, document, file_path=str(path))
-                if ctx.skip:
-                    logger.info(f"Chunking skipped by hook for {path.name}")
-                    return self._create_skipped_result(path, start_time, "Skipped by BEFORE_CHUNK hook")
-                if ctx.modified_data is not None:
-                    document = ctx.modified_data
-
-                # 2. Chunk
-                logger.debug("Step 2/5: Chunking document")
-                chunker_to_use = chunker_override if chunker_override is not None else self.chunker
-                
-                # Handle semantic chunker's async requirement
-                if hasattr(chunker_to_use, "chunk_async"):
-                    # SemanticChunker requires async operation
-                    chunks = await chunker_to_use.chunk_async(document)
-                else:
-                    # Other chunkers use sync chunk()
-                    chunks = chunker_to_use.chunk(document)
-
-                # Hook: AFTER_CHUNK
-                ctx = await self.hooks.run(HookPoint.AFTER_CHUNK, chunks, document=document, file_path=str(path))
-                if ctx.modified_data is not None:
-                    chunks = ctx.modified_data
-
-                document.chunks = chunks
-
-                chunks_created = len(chunks)
-                logger.info(f"Created {chunks_created} chunks from {path.name}")
-
-                # 2b. Run chunk add-ons
-                if self.chunk_addon_config.enabled:
-                    logger.debug(f"Step 2b/5: Running chunk add-ons: {self.chunk_addon_config.enabled}")
-                    chunks = await self._run_chunk_add_ons(chunks, document)
-                    document.chunks = chunks
-
-                # 2c. Push entities and relationships to graph store (from add-on output in metadata)
-                graph_entities_written: int | None = None
-                graph_relationships_written: int | None = None
-                if self.graph_store:
-                    entities, relationships = document_to_entities_and_relationships(document)
-                    graph_entities_written = len(entities)
-                    graph_relationships_written = len(relationships)
-                    if entities:
-                        await self.graph_store.upsert_entities(entities)
-                    if relationships:
-                        await self.graph_store.upsert_relationships(relationships)
-                    if entities or relationships:
-                        logger.info(f"Graph store: upserted {len(entities)} entities, {len(relationships)} relationships")
-                    else:
-                        logger.info(
-                            "Graph store: no entities or relationships from document. "
-                            "Ensure LangExtract add-on ran (pip install spiderweb[langextract]) and produced extractions."
-                        )
-
-                # 3. Validate
-                chunks_validated = 0
-                chunks_rejected = 0
-
-                if self.enable_validation and self.validator:
-                    logger.debug(f"Step 3/5: Validating {len(chunks)} chunks")
-                    validation_results = await self.validator.validate_batch(chunks)
-
-                    # Filter out invalid chunks
-                    valid_chunks = []
-                    for chunk, result in zip(chunks, validation_results, strict=True):
-                        if result.passed:
-                            valid_chunks.append(chunk)
-                            chunks_validated += 1
-                        else:
-                            chunks_rejected += 1
-                            logger.debug(f"Rejected chunk {chunk.id}: {result.issues}")
-
-                    chunks = valid_chunks
-                    document.chunks = chunks
-
-                    if chunks_rejected > 0:
-                        warnings.append(f"Rejected {chunks_rejected} low-quality chunks")
-                else:
-                    chunks_validated = len(chunks)
-                    logger.debug("Step 3/5: Skipping validation (disabled)")
-
-                # 4. Generate embeddings
-                embedding_start = time.time()
-
-                if self.enable_embedding and self.llm_client:
-                    logger.debug(f"Step 4/5: Generating embeddings for {len(chunks)} chunks")
-                    chunks = await self._generate_embeddings(chunks)
-                    document.chunks = chunks
-                else:
-                    logger.debug("Step 4/5: Skipping embedding generation (disabled or no LLM client)")
-
-                embedding_time = time.time() - embedding_start
-
-                # 5. Store in vector database
-                if store_chunks and chunks:
-                    logger.debug(f"Step 5/5: Storing {len(chunks)} chunks in vector store")
-
-                    # Only store chunks with embeddings
-                    chunks_with_embeddings = [c for c in chunks if c.embedding is not None]
-
-                    if chunks_with_embeddings:
-                        await self.vector_store.upsert(chunks_with_embeddings)
-                        logger.info(f"Stored {len(chunks_with_embeddings)} chunks in vector store")
-                    elif self.enable_embedding:
-                        warnings.append("No chunks with embeddings to store")
-                else:
-                    logger.debug("Step 5/5: Skipping vector store (disabled or no chunks)")
-
-                processing_time = time.time() - start_time
-
-                # Create result
-                result = IngestionResult(
-                    document=document,
-                    success=True,
-                    chunks_created=chunks_created,
-                    chunks_validated=chunks_validated,
-                    chunks_rejected=chunks_rejected,
-                    chunks_deduplicated=0,  # Tracked by validator
-                    processing_time_seconds=processing_time,
-                    embedding_time_seconds=embedding_time,
-                    errors=errors,
-                    warnings=warnings,
-                    graph_entities_written=graph_entities_written,
-                    graph_relationships_written=graph_relationships_written,
+                return await self._run_pipeline_from_document(
+                    document,
+                    store_chunks=store_chunks,
+                    chunker_override=chunker_override,
+                    source_label=str(path),
                 )
-
-                logger.info(
-                    f"Successfully processed {path.name}: "
-                    f"{chunks_created} chunks, {chunks_validated} validated, "
-                    f"{processing_time:.2f}s"
-                )
-
-                return result
 
             except Exception as e:
                 processing_time = time.time() - start_time
@@ -644,16 +774,18 @@ class DocumentProcessor:
             addon_kwargs = {"llm_client": self.llm_client, **addon_options}
             addon = chunk_addon_registry.create(addon_name, **addon_kwargs)
 
-            # Run add-on (prefer async, fall back to sync)
-            if hasattr(addon, "process_async"):
-                chunks = await addon.process_async(chunks, document=document)
-            elif hasattr(addon, "process"):
-                chunks = addon.process(chunks, document=document)
-            else:
-                raise ValueError(
-                    f"Add-on '{addon_name}' does not implement process() or process_async()"
-                )
-
-            logger.debug(f"Ran add-on '{addon_name}' on {len(chunks)} chunks")
+            # Run add-on (prefer async, fall back to sync); on error log and continue with current chunks
+            try:
+                if hasattr(addon, "process_async"):
+                    chunks = await addon.process_async(chunks, document=document)
+                elif hasattr(addon, "process"):
+                    chunks = addon.process(chunks, document=document)
+                else:
+                    raise ValueError(
+                        f"Add-on '{addon_name}' does not implement process() or process_async()"
+                    )
+                logger.debug(f"Ran add-on '{addon_name}' on {len(chunks)} chunks")
+            except Exception as e:
+                logger.error("Chunk add-on '%s' failed: %s. Continuing with current chunks.", addon_name, e, exc_info=True)
 
         return chunks

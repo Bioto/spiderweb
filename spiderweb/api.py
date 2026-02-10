@@ -911,57 +911,31 @@ class Spiderweb:
                     output_schema=output_schema,
                 )
                 
-                # Ingest each document
+                # Ingest each document via single pipeline path
                 results = []
                 for doc in documents:
-                    # Process through pipeline
-                    # Note: We already have the Document, so we skip file loading
-                    # and just chunk/embed/store
-                    doc.chunks = self.document_processor.chunker.chunk(doc)
-                    
-                    # Run chunk add-ons if enabled
-                    if self.document_processor.chunk_addon_config.enabled:
-                        doc.chunks = await self.document_processor._run_chunk_add_ons(doc.chunks, doc)
-                    
-                    if self.document_processor.enable_validation and self.document_processor.validator:
-                        validation_results = await self.document_processor.validator.validate_batch(doc.chunks)
-                        valid_chunks = [
-                            chunk for chunk, result in zip(doc.chunks, validation_results)
-                            if result.passed
-                        ]
-                        doc.chunks = valid_chunks
-                    
-                    if self.document_processor.enable_embedding and self.llm_client:
-                        doc.chunks = await self.document_processor._generate_embeddings(doc.chunks)
-                    
-                    if doc.chunks:
-                        chunks_with_embeddings = [c for c in doc.chunks if c.embedding is not None]
-                        if chunks_with_embeddings:
-                            await self.document_processor.vector_store.upsert(chunks_with_embeddings)
-                    
-                    results.append(IngestionResult(
-                        document=doc,
-                        success=True,
-                        chunks_created=len(doc.chunks),
-                        chunks_validated=len(doc.chunks),
-                        chunks_rejected=0,
-                        processing_time_seconds=0.0,
-                        embedding_time_seconds=0.0,
-                        errors=[],
-                        warnings=[],
-                    ))
-                
-                # Create batch result
+                    result = await self.document_processor.process_document(
+                        doc, store_chunks=True
+                    )
+                    results.append(result)
+
+                successful = sum(1 for r in results if r.success)
+                errors_by_source = {
+                    doc.metadata.source: r.errors
+                    for doc, r in zip(documents, results, strict=True)
+                    if r.errors
+                }
                 return BatchIngestionResult(
                     total_documents=len(documents),
-                    successful_documents=len(results),
-                    failed_documents=0,
+                    successful_documents=successful,
+                    failed_documents=len(results) - successful,
                     total_chunks=sum(r.chunks_created for r in results),
                     total_chunks_validated=sum(r.chunks_validated for r in results),
                     total_chunks_rejected=sum(r.chunks_rejected for r in results),
                     processing_time_seconds=sum(r.processing_time_seconds for r in results),
                     average_time_per_document=sum(r.processing_time_seconds for r in results) / len(results) if results else 0.0,
-                    errors={},
+                    results=results,
+                    errors=errors_by_source,
                 )
             
             else:
@@ -972,40 +946,8 @@ class Spiderweb:
                     extraction_config=extraction_config,
                     output_schema=output_schema,
                 )
-                
-                # Process through pipeline
-                doc.chunks = self.document_processor.chunker.chunk(doc)
-                
-                # Run chunk add-ons if enabled
-                if self.document_processor.chunk_addon_config.enabled:
-                    doc.chunks = await self.document_processor._run_chunk_add_ons(doc.chunks, doc)
-                
-                if self.document_processor.enable_validation and self.document_processor.validator:
-                    validation_results = await self.document_processor.validator.validate_batch(doc.chunks)
-                    valid_chunks = [
-                        chunk for chunk, result in zip(doc.chunks, validation_results)
-                        if result.passed
-                    ]
-                    doc.chunks = valid_chunks
-                
-                if self.document_processor.enable_embedding and self.llm_client:
-                    doc.chunks = await self.document_processor._generate_embeddings(doc.chunks)
-                
-                if doc.chunks:
-                    chunks_with_embeddings = [c for c in doc.chunks if c.embedding is not None]
-                    if chunks_with_embeddings:
-                        await self.document_processor.vector_store.upsert(chunks_with_embeddings)
-                
-                return IngestionResult(
-                    document=doc,
-                    success=True,
-                    chunks_created=len(doc.chunks),
-                    chunks_validated=len(doc.chunks),
-                    chunks_rejected=0,
-                    processing_time_seconds=0.0,
-                    embedding_time_seconds=0.0,
-                    errors=[],
-                    warnings=[],
+                return await self.document_processor.process_document(
+                    doc, store_chunks=True
                 )
 
     async def search_crawl_extract(
@@ -1355,7 +1297,6 @@ class Spiderweb:
         
         # Handle ingestion if requested
         if ingest:
-            # Ingest all crawled pages
             for round_data in trace.rounds:
                 for page in round_data.pages:
                     if page.crawl_result and page.crawl_result.success:
@@ -1365,29 +1306,9 @@ class Spiderweb:
                             extraction_config=extraction_config,
                             output_schema=output_schema,
                         )
-                        
-                        # Process through pipeline
-                        doc.chunks = self.document_processor.chunker.chunk(doc)
-                        
-                        # Run chunk add-ons if enabled
-                        if self.document_processor.chunk_addon_config.enabled:
-                            doc.chunks = await self.document_processor._run_chunk_add_ons(doc.chunks, doc)
-                        
-                        if self.document_processor.enable_validation and self.document_processor.validator:
-                            validation_results = await self.document_processor.validator.validate_batch(doc.chunks)
-                            valid_chunks = [
-                                chunk for chunk, result in zip(doc.chunks, validation_results)
-                                if result.passed
-                            ]
-                            doc.chunks = valid_chunks
-                        
-                        if self.document_processor.enable_embedding and self.llm_client:
-                            doc.chunks = await self.document_processor._generate_embeddings(doc.chunks)
-                        
-                        if doc.chunks:
-                            chunks_with_embeddings = [c for c in doc.chunks if c.embedding is not None]
-                            if chunks_with_embeddings:
-                                await self.document_processor.vector_store.upsert(chunks_with_embeddings)
+                        await self.document_processor.process_document(
+                            doc, store_chunks=True
+                        )
         
         return trace
 
@@ -1458,9 +1379,34 @@ class Spiderweb:
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
-        """Async context manager exit."""
-        # Cleanup if needed
-        pass
+        """Async context manager exit. Closes graph store and vector store if they support close()."""
+        import asyncio
+
+        if self._document_processor is None:
+            return
+
+        proc = self._document_processor
+        if proc.graph_store is not None:
+            close_fn = getattr(proc.graph_store, "close", None)
+            if close_fn is not None:
+                try:
+                    if asyncio.iscoroutinefunction(close_fn):
+                        await close_fn()
+                    else:
+                        close_fn()
+                except Exception as e:
+                    logger.warning("Error closing graph store: %s", e)
+
+        if getattr(proc, "vector_store", None) is not None:
+            close_fn = getattr(proc.vector_store, "close", None)
+            if close_fn is not None:
+                try:
+                    if asyncio.iscoroutinefunction(close_fn):
+                        await close_fn()
+                    else:
+                        close_fn()
+                except Exception as e:
+                    logger.warning("Error closing vector store: %s", e)
 
 
 # Convenience functions for quick usage (gluellm-style)
