@@ -295,16 +295,15 @@ async def _x_search_expand(
                 console.print(f"    [dim]1 following:[/dim]  @{f.get('username', f.get('id', '?'))} — {f.get('name', '')}")
             else:
                 console.print("    [dim]1 following:[/dim]  (none)")
-        # Show each user's tweets when we pulled them
+        # Show each user's tweets when we pulled them (full content)
         for username, scrape in result.user_results:
             if scrape.tweets:
                 console.print(f"\n[bold]Tweets by @{username}[/bold]")
                 for i, t in enumerate(scrape.tweets, 1):
-                    preview = (t.content or "").strip().split("\n")[0][:120]
-                    if len((t.content or "").strip().split("\n")[0]) > 120:
-                        preview += "..."
+                    full_content = (t.content or "").strip()
                     console.print(f"  [dim]{i}.[/dim] [cyan]{t.url}[/cyan]")
-                    console.print(f"      {preview}")
+                    for line in full_content.split("\n"):
+                        console.print(f"      {line}")
         console.print()
 
     if ingest and result.all_crawl_results:
