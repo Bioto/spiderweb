@@ -37,7 +37,7 @@ console = Console()
 )
 @click.option(
     "--crawl-provider",
-    type=click.Choice(["http", "crawl4ai"]),
+    type=click.Choice(["http", "crawl4ai", "x"]),
     default="crawl4ai",
     help="Crawler backend. Default: crawl4ai.",
 )

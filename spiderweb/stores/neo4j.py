@@ -142,29 +142,35 @@ class Neo4jGraphStore:
         self,
         limit: int = 100,
         type_filter: str | None = None,
+        attributes_filter: dict | None = None,
     ) -> list[dict]:
-        """Return entities (nodes) from Neo4j."""
+        """Return entities (nodes) from Neo4j, optionally filtered by type and attributes."""
         driver = await self._get_driver()
+        params: dict = {"limit": limit}
+        where_clauses = ["n.id IS NOT NULL"]
         if type_filter:
             label = "".join(
                 c if c.isalnum() or c == "_" else "_" for c in type_filter
             ) or "Entity"
-            query = f"""
-                MATCH (n:{label})
-                RETURN n.id AS id, n.label AS label, labels(n)[0] AS type,
-                       n.document_id AS document_id
-                LIMIT $limit
-                """
+            match_clause = f"MATCH (n:{label})"
         else:
-            query = """
-                MATCH (n)
-                WHERE n.id IS NOT NULL
-                RETURN n.id AS id, n.label AS label, labels(n)[0] AS type,
-                       n.document_id AS document_id
-                LIMIT $limit
-                """
+            match_clause = "MATCH (n)"
+        if attributes_filter:
+            for i, (k, v) in enumerate(attributes_filter.items()):
+                safe_key = "".join(c if c.isalnum() or c == "_" else "_" for c in k) or "attr"
+                param_name = f"attr_{i}_{safe_key}"
+                where_clauses.append(f"n.{safe_key} = ${param_name}")
+                params[param_name] = v
+        where_str = " AND ".join(where_clauses)
+        query = f"""
+            {match_clause}
+            WHERE {where_str}
+            RETURN n.id AS id, n.label AS label, labels(n)[0] AS type,
+                   n.document_id AS document_id
+            LIMIT $limit
+            """
         async with driver.session(database=self._database) as session:
-            result = await session.run(query, {"limit": limit})
+            result = await session.run(query, params)
             records = await result.data()
         return [
             {

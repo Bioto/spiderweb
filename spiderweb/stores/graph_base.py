@@ -41,12 +41,15 @@ class GraphStore(Protocol):
         self,
         limit: int = 100,
         type_filter: str | None = None,
+        attributes_filter: dict | None = None,
     ) -> list[dict]:
         """Return entities (nodes) from the graph.
 
         Args:
             limit: Maximum number of entities to return.
             type_filter: Optional label/type to filter by (e.g. Person, Organization).
+            attributes_filter: Optional dict of attribute key-value pairs to filter by
+                (e.g. {"source_type": "x_tweet"} to scope to X tweets only).
 
         Returns:
             List of dicts with at least id, type, label; may include document_id, attributes.

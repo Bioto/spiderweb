@@ -68,6 +68,30 @@ python examples/crawl_with_local_storage.py
 
 ---
 
+### `x_search_and_follow_graph.py`
+
+Search X (Twitter) for a term, take the top Y tweets, then expand to all posting users and their followers/following.
+
+**What it demonstrates:**
+- X search by keyword/hashtag (`XCrawler.search`)
+- Taking top Y results and extracting posting usernames
+- Scraping each user: profile, followers, following (`XCrawler.scrape_user`)
+- Optional graph depth (1 = user + lists; 2+ = recurse into those users)
+- Building a single list of CrawlResults for ingestion (entities, vector/graph store)
+
+**Run it:**
+```bash
+export SPIDERWEB_X_BEARER_TOKEN=your_bearer_token
+python examples/x_search_and_follow_graph.py
+```
+
+**Config (edit the script):** `SEARCH_QUERY`, `TOP_Y_TWEETS`, `MAX_FOLLOWERS_PER_USER`, `MAX_FOLLOWING_PER_USER`, `GRAPH_DEPTH`, `MAX_USERS_PER_LEVEL`.
+
+**Requirements:**
+- `SPIDERWEB_X_BEARER_TOKEN` (X API v2 Bearer token, pay-per-request)
+
+---
+
 ## Running Examples
 
 All examples use async/await, so they must be run with Python's asyncio support:

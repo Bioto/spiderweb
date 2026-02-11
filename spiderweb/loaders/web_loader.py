@@ -133,7 +133,7 @@ class WebLoader:
         )
         
         return document
-    
+
     async def load(
         self,
         url: str,
@@ -141,63 +141,33 @@ class WebLoader:
         extraction_config: CrawlExtractionConfig | None = None,
         output_schema: type["BaseModel"] | None = None,
     ) -> Document:
-        """Load and process content from a URL.
-        
-        Args:
-            url: URL to load
-            crawler_config: Optional crawler configuration (overrides instance config)
-            extraction_config: Optional extraction configuration (overrides instance config)
-            output_schema: Optional Pydantic schema for structured extraction
-            
-        Returns:
-            Document with content and metadata
-            
-        Raises:
-            ValueError: If URL is invalid or crawl fails
-        """
+        """Load and process content from a URL."""
         config = crawler_config or self.crawler_config
         extract_config = extraction_config or self.extraction_config
-        
         logger.info(f"Loading URL: {url}")
-        
-        # Hook: BEFORE_CRAWL
         ctx = await self.hooks.run(HookPoint.BEFORE_CRAWL, url, config=config)
         if ctx.skip:
             raise ValueError(f"Crawl skipped by BEFORE_CRAWL hook for {url}")
         crawl_url = ctx.modified_data if ctx.modified_data is not None else url
-        
-        # Crawl the URL
         result = await self.crawler.crawl(crawl_url, config)
-        
-        # Hook: AFTER_CRAWL
         ctx = await self.hooks.run(HookPoint.AFTER_CRAWL, result, url=crawl_url, config=config)
         if ctx.modified_data is not None:
             result = ctx.modified_data
-        
         if not result.success:
             raise ValueError(f"Failed to crawl {crawl_url}: {result.error}")
-        
-        # Perform extraction if enabled
         extracted_data = None
         if extract_config.enabled and self.extractor:
             try:
                 logger.debug("Performing LLM extraction on crawled content")
-                
-                # Use output_schema if provided, otherwise from config
                 schema = output_schema or extract_config.output_schema
-                
-                # Choose content to extract from (prefer markdown)
                 extract_content = result.markdown if result.markdown else result.content
-                
-                # Perform extraction with auto-improvement if enabled
                 if extract_config.auto_improve and schema:
-                    extracted_data, improvement_log = await self.extractor.extract_with_improvement(
+                    extracted_data, _ = await self.extractor.extract_with_improvement(
                         extract_content,
                         schema=schema,
                         semantic_guide=extract_config.semantic_guide,
                         extraction_query=extract_config.extraction_query,
                     )
-                    logger.debug(f"Extraction with improvement: {len(improvement_log)} iterations")
                 else:
                     extracted_data = await self.extractor.extract(
                         extract_content,
@@ -205,20 +175,13 @@ class WebLoader:
                         semantic_guide=extract_config.semantic_guide,
                         extraction_query=extract_config.extraction_query,
                     )
-                
                 logger.info(f"Successfully extracted structured data from {url}")
-            
             except Exception as e:
                 logger.warning(f"Extraction failed for {url}: {e}")
-                # Continue without extraction rather than failing completely
-        
-        # Convert to Document
         document = self._crawl_result_to_document(result, extracted_data)
-        
         logger.debug(f"Loaded document from {url}: {len(document.raw_content)} characters")
-        
         return document
-    
+
     async def load_many(
         self,
         urls: list[str],
@@ -226,55 +189,29 @@ class WebLoader:
         extraction_config: CrawlExtractionConfig | None = None,
         output_schema: type["BaseModel"] | None = None,
     ) -> list[Document]:
-        """Load and process content from multiple URLs.
-        
-        Supports link following and concurrent crawling based on crawler config.
-        
-        Args:
-            urls: List of URLs to load
-            crawler_config: Optional crawler configuration
-            extraction_config: Optional extraction configuration
-            output_schema: Optional Pydantic schema for structured extraction
-            
-        Returns:
-            List of Document objects
-        """
+        """Load and process content from multiple URLs."""
         config = crawler_config or self.crawler_config
         extract_config = extraction_config or self.extraction_config
-        
         logger.info(f"Loading {len(urls)} URLs")
-        
-        # Hook: BEFORE_CRAWL for batch (pass list of URLs)
         ctx = await self.hooks.run(HookPoint.BEFORE_CRAWL, urls, config=config, batch=True)
         if ctx.skip:
             logger.warning("Batch crawl skipped by BEFORE_CRAWL hook")
             return []
         crawl_urls = ctx.modified_data if ctx.modified_data is not None else urls
-        
-        # Crawl all URLs (with link following if configured)
         results = await self.crawler.crawl_many(crawl_urls, config)
-        
-        # Hook: AFTER_CRAWL for batch
         ctx = await self.hooks.run(HookPoint.AFTER_CRAWL, results, urls=crawl_urls, config=config, batch=True)
         if ctx.modified_data is not None:
             results = ctx.modified_data
-        
-        # Process each result
         documents: list[Document] = []
-        
         for result in results:
             if not result.success:
                 logger.warning(f"Skipping failed crawl: {result.url} ({result.error})")
                 continue
-            
-            # Perform extraction if enabled
             extracted_data = None
             if extract_config.enabled and self.extractor:
                 try:
                     schema = output_schema or extract_config.output_schema
                     extract_content = result.markdown if result.markdown else result.content
-                    
-                    # Use basic extraction for batch (no auto-improve to save time)
                     extracted_data = await self.extractor.extract(
                         extract_content,
                         schema=schema,
@@ -283,12 +220,50 @@ class WebLoader:
                     )
                 except Exception as e:
                     logger.warning(f"Extraction failed for {result.url}: {e}")
-            
-            # Convert to Document
             document = self._crawl_result_to_document(result, extracted_data)
             documents.append(document)
-        
         logger.info(f"Successfully loaded {len(documents)} documents from {len(crawl_urls)} starting URLs")
-        
         return documents
+
+
+def crawl_result_to_document(
+    result: CrawlResult,
+    extracted_data: Union[dict, "BaseModel", None] = None,
+    crawler_name: str = "Crawler",
+) -> Document:
+    """Convert a CrawlResult to a Document (e.g. for ingestion with entity/topic add-ons).
+
+    Use this to run the full pipeline (chunking, LangExtract, entity-relations, graph)
+    on X or other crawl results so entities and topics are parsed and queryable.
+
+    Args:
+        result: Crawl result from any crawler (e.g. XCrawler.search or scrape_user).
+        extracted_data: Optional structured extraction result to attach.
+        crawler_name: Optional crawler class name for metadata (default "Crawler").
+
+    Returns:
+        Document with content and metadata (including result.metadata for scoping).
+    """
+    content = result.markdown if result.markdown else result.content
+    metadata = DocumentMetadata(
+        source=result.url,
+        file_type="html",
+        extraction_method=crawler_name,
+        extra={
+            "status_code": result.status_code,
+            "success": result.success,
+            "links_found": len(result.links),
+            **result.metadata,
+        },
+    )
+    if extracted_data:
+        if hasattr(extracted_data, "model_dump"):
+            metadata.extra["extracted_data"] = extracted_data.model_dump()
+        else:
+            metadata.extra["extracted_data"] = extracted_data
+    return Document(
+        raw_content=result.content,
+        markdown_content=content,
+        metadata=metadata,
+    )
 

@@ -58,6 +58,7 @@ from spiderweb.crawlers.base import Crawler, CrawlResult
 from spiderweb.crawlers.crawl4ai import Crawl4AICrawler
 from spiderweb.crawlers.extraction import CrawlExtractor
 from spiderweb.crawlers.http import HttpCrawler
+from spiderweb.crawlers.x import XCrawler, XUserScrapeResult
 from spiderweb.hooks import HookContext, HookManager, HookPoint, hooks
 from spiderweb.loaders.web_loader import WebLoader
 from spiderweb.models.config import (
@@ -74,6 +75,7 @@ from spiderweb.models.config import (
     SearchProviderConfig,
     ValidatorConfig,
     VectorStoreConfig,
+    XScraperConfig,
 )
 from spiderweb.models.graph import Entity, Relationship
 from spiderweb.stores.graph_base import GraphStore
@@ -87,6 +89,7 @@ from spiderweb.registry import (
     search_provider_registry,
 )
 from spiderweb.search.base import SearchProvider, SearchResult, SearchResultBatch
+from spiderweb.workflows.x_search_expand import XSearchExpandResult, XSearchExpandWorkflow
 
 __all__ = [
     # Main API
@@ -100,6 +103,8 @@ __all__ = [
     "HttpCrawler",
     "Crawl4AICrawler",
     "CrawlExtractor",
+    "XCrawler",
+    "XUserScrapeResult",
     "WebLoader",
     # Configuration
     "SpiderwebSettings",
@@ -120,6 +125,7 @@ __all__ = [
     "ResearchAgentConfig",
     "CrawlerConfig",
     "CrawlExtractionConfig",
+    "XScraperConfig",
     "SearchProviderConfig",
     "SearchDepthConfig",
     # Research Agent
@@ -130,6 +136,9 @@ __all__ = [
     "SearchProvider",
     "SearchResult",
     "SearchResultBatch",
+    # Workflows
+    "XSearchExpandResult",
+    "XSearchExpandWorkflow",
     # Extensibility - Registries
     "ComponentRegistry",
     "chunker_registry",

@@ -16,6 +16,7 @@ from spiderweb.cli.commands.progressive_query import progressive_query_cmd
 from spiderweb.cli.commands.query import query_cmd
 from spiderweb.cli.commands.research import goal_cmd, research_cmd
 from spiderweb.cli.commands.search import search_cmd
+from spiderweb.cli.commands.x_search import x_search_expand_cmd
 from spiderweb._version import get_version
 
 
@@ -41,6 +42,7 @@ cli.add_command(progressive_query_cmd)
 cli.add_command(query_cmd)
 cli.add_command(research_cmd)
 cli.add_command(search_cmd)
+cli.add_command(x_search_expand_cmd)
 
 
 if __name__ == "__main__":

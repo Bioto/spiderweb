@@ -24,7 +24,10 @@ from spiderweb.models.config import ChunkAddOnConfig, ChunkerConfig, ValidatorCo
 from spiderweb.models.document import Chunk, Document, DocumentMetadata
 from spiderweb.models.result import IngestionResult
 from spiderweb.observability.logging_config import get_logger
-from spiderweb.pipeline.graph_adapter import document_to_entities_and_relationships
+from spiderweb.pipeline.graph_adapter import (
+    _scope_attributes_from_document,
+    document_to_entities_and_relationships,
+)
 from spiderweb.registry import chunk_addon_registry, chunker_registry
 from spiderweb.stores.memory import MemoryVectorStore
 from spiderweb.validators.pipeline import ValidationPipeline
@@ -479,6 +482,13 @@ class DocumentProcessor:
                     f"Step 2b/5: Running chunk add-ons: {self.chunk_addon_config.enabled}"
                 )
                 chunks = await self._run_chunk_add_ons(chunks, document)
+                document.chunks = chunks
+
+            # Propagate document source-scoping metadata to chunks (for vector query filter_dict)
+            scope_attrs = _scope_attributes_from_document(document)
+            if scope_attrs:
+                for ch in chunks:
+                    ch.metadata.extra = {**(ch.metadata.extra or {}), **scope_attrs}
                 document.chunks = chunks
 
             # Graph store

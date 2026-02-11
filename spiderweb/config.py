@@ -242,6 +242,10 @@ class SpiderwebSettings(BaseSettings):
         le=50,
         description="Default maximum concurrent crawl requests",
     )
+    x_bearer_token: str | None = Field(
+        default=None,
+        description="X (Twitter) API Bearer token for the 'x' crawler (pay-per-request). Set SPIDERWEB_X_BEARER_TOKEN.",
+    )
 
     # Search depth settings
     default_max_search_rounds: int = Field(

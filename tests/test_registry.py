@@ -137,6 +137,7 @@ class TestDefaultRegistrations:
         """All default crawlers are registered."""
         assert "http" in crawler_registry
         assert "crawl4ai" in crawler_registry
+        assert "x" in crawler_registry
 
     def test_extractor_defaults_registered(self):
         """Default extractors are registered."""

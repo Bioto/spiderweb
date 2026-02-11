@@ -50,19 +50,48 @@ def graph_query_cmd() -> None:
     default=None,
     help="Filter by entity type/label (e.g. Person, Organization)",
 )
+@click.option(
+    "--source-type",
+    type=str,
+    default=None,
+    help="Scope to source (e.g. x_tweet, x_user) when entities have source_type attribute",
+)
+@click.option(
+    "--attr",
+    "attr_pairs",
+    multiple=True,
+    type=str,
+    help="Filter by attribute (e.g. --attr source_type=x_tweet or --attr x_user_id=123)",
+)
 def entities_cmd(
     graph_store_url: str,
     limit: int,
     type_filter: str | None,
+    source_type: str | None,
+    attr_pairs: tuple[str, ...],
 ) -> None:
     """List entities (nodes) in the graph."""
-    asyncio.run(_entities(graph_store_url, limit, type_filter))
+    asyncio.run(_entities(graph_store_url, limit, type_filter, source_type, attr_pairs))
+
+
+def _parse_attr_pairs(pairs: tuple[str, ...], source_type: str | None) -> dict | None:
+    """Build attributes_filter dict from --attr key=value and --source-type."""
+    out: dict = {}
+    if source_type is not None:
+        out["source_type"] = source_type
+    for s in pairs:
+        if "=" in s:
+            k, _, v = s.partition("=")
+            out[k.strip()] = v.strip()
+    return out if out else None
 
 
 async def _entities(
     graph_store_url: str,
     limit: int,
     type_filter: str | None,
+    source_type: str | None,
+    attr_pairs: tuple[str, ...],
 ) -> None:
     try:
         config = parse_graph_store_url(graph_store_url)
@@ -78,10 +107,15 @@ async def _entities(
         )
         return
 
+    attributes_filter = _parse_attr_pairs(attr_pairs, source_type)
     store = Neo4jGraphStore.from_config(config)
     try:
         console.print("[cyan]Fetching entities...[/cyan]\n")
-        entities = await store.list_entities(limit=limit, type_filter=type_filter)
+        entities = await store.list_entities(
+            limit=limit,
+            type_filter=type_filter,
+            attributes_filter=attributes_filter,
+        )
     except Exception as e:
         console.print(f"[red]Error querying graph: {e}[/red]")
         if "Bolt" in str(e) or "connect" in str(e).lower() or "handshake" in str(e).lower():

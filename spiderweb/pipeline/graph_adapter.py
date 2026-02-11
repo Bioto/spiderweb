@@ -2,6 +2,8 @@
 
 Maps add-on output (e.g. document.metadata.extra["langextract"],
 document.metadata.extra["relationships"]) to GraphStore input types.
+Also copies source-scoping keys from document.metadata.extra into Entity.attributes
+so graph queries can filter by source (e.g. source_type=x_tweet, x_user_id).
 """
 
 from __future__ import annotations
@@ -12,6 +14,26 @@ from typing import Any
 
 from spiderweb.models.document import Document
 from spiderweb.models.graph import Entity, Relationship
+
+# Keys from document.metadata.extra to copy onto Entity.attributes for query scoping
+_SCOPE_ATTR_KEYS = frozenset(
+    {"source_type", "x_tweet_id", "x_user_id", "tweet_id", "author_id", "username"}
+)
+
+
+def _scope_attributes_from_document(document: Document) -> dict[str, str | int | float | bool]:
+    """Copy source-scoping keys from document.metadata.extra for graph/vector query filtering."""
+    extra = document.metadata.extra or {}
+    out: dict[str, str | int | float | bool] = {}
+    for k in _SCOPE_ATTR_KEYS:
+        if k not in extra:
+            continue
+        v = extra[k]
+        if isinstance(v, (str, int, float, bool)):
+            out[k] = v
+        elif v is not None:
+            out[k] = str(v)
+    return out
 
 
 def _normalize_attributes(raw: dict[str, Any]) -> dict[str, str | int | float | bool]:
@@ -75,12 +97,14 @@ def document_to_entities_and_relationships(
             start = ex.get("start_char")
             end = ex.get("end_char")
             eid = entity_id_from_extraction(document.id, i, ex)
+            scope_attrs = _scope_attributes_from_document(document)
+            merged_attrs = {**attrs, **scope_attrs}
             entities.append(
                 Entity(
                     id=eid,
                     type=etype,
                     label=text,
-                    attributes=attrs,
+                    attributes=merged_attrs,
                     document_id=document.id,
                     chunk_id=None,
                 )

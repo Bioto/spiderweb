@@ -15,7 +15,7 @@ if TYPE_CHECKING:
 from spiderweb.config import settings
 from spiderweb.crawlers.base import CrawlResult
 from spiderweb.hooks import hooks as global_hooks
-from spiderweb.loaders.web_loader import WebLoader
+from spiderweb.loaders.web_loader import WebLoader, crawl_result_to_document
 from spiderweb.models.config import (
     ChunkAddOnConfig,
     ChunkerConfig,
@@ -44,6 +44,11 @@ from spiderweb.search.relevance import filter_by_relevance
 from spiderweb.search.trace import FilteredCandidate, PageRecord, SearchCrawlTrace, SearchRound
 from spiderweb.search.writers import write_trace
 from spiderweb.utils.path_utils import sanitize_query_for_path
+from spiderweb.workflows.x_search_expand import (
+    ProgressCallback,
+    XSearchExpandResult,
+    XSearchExpandWorkflow,
+)
 
 logger = get_logger(__name__)
 
@@ -722,6 +727,130 @@ class Spiderweb:
         )
         if not isinstance(result, BatchIngestionResult):
             raise TypeError(f"crawl_and_ingest_many() expected BatchIngestionResult, got {type(result).__name__}")
+        return result
+
+    async def ingest_x_crawl_results(
+        self,
+        crawl_results: list[CrawlResult],
+        crawler_name: str = "XCrawler",
+    ) -> BatchIngestionResult:
+        """Ingest X (or other) crawl results with full pipeline: chunking, entity/topic add-ons, graph.
+
+        Converts each CrawlResult to a Document (preserving source_type, tweet_id, x_user_id, etc.),
+        runs the document processor (chunking, LangExtract, entity-relations, graph store), and
+        returns a batch result. Use this after XCrawler.search() or scrape_user().to_crawl_results()
+        so entities and topics are parsed and queryable (vector + graph) with scoping by source.
+
+        Args:
+            crawl_results: List of CrawlResult (e.g. from X search or scrape_user).
+            crawler_name: Name for metadata (default XCrawler).
+
+        Returns:
+            BatchIngestionResult with per-document results.
+        """
+        if not crawl_results:
+            return BatchIngestionResult(
+                total_documents=0,
+                successful_documents=0,
+                failed_documents=0,
+                total_chunks=0,
+                total_chunks_validated=0,
+                total_chunks_rejected=0,
+                processing_time_seconds=0.0,
+                average_time_per_document=0.0,
+                results=[],
+                errors={},
+            )
+        documents = [
+            crawl_result_to_document(r, crawler_name=crawler_name) for r in crawl_results
+        ]
+        results = []
+        for doc in documents:
+            result = await self.document_processor.process_document(doc, store_chunks=True)
+            results.append(result)
+        successful = sum(1 for r in results if r.success)
+        errors_by_source = {
+            doc.metadata.source: r.errors
+            for doc, r in zip(documents, results, strict=True)
+            if r.errors
+        }
+        return BatchIngestionResult(
+            total_documents=len(documents),
+            successful_documents=successful,
+            failed_documents=len(results) - successful,
+            total_chunks=sum(r.chunks_created for r in results),
+            total_chunks_validated=sum(r.chunks_validated for r in results),
+            total_chunks_rejected=sum(r.chunks_rejected for r in results),
+            processing_time_seconds=sum(r.processing_time_seconds for r in results),
+            average_time_per_document=sum(r.processing_time_seconds for r in results) / len(results) if results else 0.0,
+            results=results,
+            errors=errors_by_source,
+        )
+
+    async def x_search_and_expand(
+        self,
+        query: str,
+        *,
+        top_tweets: int = 10,
+        max_followers_per_user: int | None = None,
+        max_following_per_user: int | None = None,
+        graph_depth: int | None = None,
+        max_users_per_level: int | None = None,
+        crawler_config: CrawlerConfig | None = None,
+        ingest: bool = False,
+        expand_query: bool = True,
+        progress_callback: ProgressCallback | None = None,
+    ) -> XSearchExpandResult:
+        """Run the default X workflow: search → top Y tweets → expand to each poster's followers/following.
+
+        Uses the built-in XSearchExpandWorkflow. When llm_client is set and expand_query is True,
+        the query is rewritten into an X Search API query via GlueLLM before searching.
+
+        Optionally ingests all resulting CrawlResults (tweets + user profiles) with the full
+        pipeline (entities, graph, vector store).
+
+        Args:
+            query: User search term or X search query (e.g. "msp", "#python").
+            top_tweets: Number of top tweet results to use (default 10).
+            max_followers_per_user: Cap per user (None = use config default).
+            max_following_per_user: Cap per user (None = use config default).
+            graph_depth: 1 = user + lists; 2+ = recurse (None = use config default).
+            max_users_per_level: When depth > 1, cap per level (None = use config default).
+            crawler_config: X crawler config (provider="x", x_bearer_token required).
+            ingest: If True, run ingest_x_crawl_results on the workflow result and attach
+                BatchIngestionResult to result.ingestion_result.
+            expand_query: If True and Spiderweb has llm_client, rewrite query via LLM (default True).
+            progress_callback: Optional (step, current, total, detail) callback for progress UI.
+
+        Returns:
+            XSearchExpandResult with tweet_results, user_results, all_crawl_results,
+            and optionally ingestion_result when ingest=True. When query was expanded,
+            result.resolved_query holds the actual X API query used.
+        """
+        config = crawler_config or CrawlerConfig(provider="x")
+        if not config.extra_config.get("x_bearer_token") and not settings.x_bearer_token:
+            config.extra_config["x_bearer_token"] = settings.x_bearer_token
+        workflow = XSearchExpandWorkflow(
+            top_tweets=top_tweets,
+            max_followers_per_user=max_followers_per_user,
+            max_following_per_user=max_following_per_user,
+            graph_depth=graph_depth,
+            max_users_per_level=max_users_per_level,
+        )
+        result = await workflow.run(
+            query,
+            crawler=None,
+            config=config,
+            llm_client=self.llm_client,
+            expand_query=expand_query,
+            progress_callback=progress_callback,
+        )
+        if ingest and result.all_crawl_results:
+            batch = await self.ingest_x_crawl_results(
+                result.all_crawl_results,
+                crawler_name="XCrawler",
+            )
+            result.ingestion_result = batch
         return result
 
     @overload

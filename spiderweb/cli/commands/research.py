@@ -35,7 +35,7 @@ def _common_options(f):
     f = click.option("--max-parallel", type=int, default=5, help="Max concurrent search-crawl runs. Default: 5.")(f)
     f = click.option("--search-provider", type=str, default="duckduckgo", help="Search provider. Default: duckduckgo.")(f)
     f = click.option("--limit", type=int, default=10, help="Max search results per round. Default: 10.")(f)
-    f = click.option("--crawl-provider", type=click.Choice(["http", "crawl4ai"]), default="crawl4ai", help="Crawler. Default: crawl4ai.")(f)
+    f = click.option("--crawl-provider", type=click.Choice(["http", "crawl4ai", "x"]), default="crawl4ai", help="Crawler. Default: crawl4ai.")(f)
     f = click.option("--max-rounds", type=int, default=1, help="Max search rounds per query. Default: 1.")(f)
     f = click.option("--crawl-per-round", type=int, default=3, help="Crawl this many results per round. Default: 3.")(f)
     f = click.option("--no-js", is_flag=True, default=False, help="Disable JavaScript rendering.")(f)

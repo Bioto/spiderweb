@@ -6,6 +6,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from spiderweb.crawlers.base import CrawlResult
 from spiderweb.crawlers.http import HttpCrawler
 from spiderweb.crawlers.extraction import CrawlExtractor
+from spiderweb.crawlers.x import (
+    XCrawler,
+    XUserScrapeResult,
+    _get_x_scraper_config,
+    _is_x_status_url,
+    _tweet_id_from_url,
+)
+from spiderweb.models.config import XScraperConfig
 from spiderweb.loaders.web_loader import WebLoader
 from spiderweb.models.config import CrawlerConfig, CrawlExtractionConfig
 from pydantic import BaseModel
@@ -263,6 +271,145 @@ class TestWebLoader:
         assert document.metadata.file_type == "html"
         assert document.metadata.extra["status_code"] == 200
         assert document.metadata.extra["test"] == "value"
+
+
+class TestXCrawler:
+    """Tests for X (Twitter) API crawler."""
+
+    def test_is_x_status_url(self):
+        """X status URLs are detected."""
+        assert _is_x_status_url("https://x.com/user/status/1234567890") is True
+        assert _is_x_status_url("https://twitter.com/user/status/1234567890") is True
+        assert _is_x_status_url("https://www.x.com/handle/status/999") is True
+        assert _is_x_status_url("https://example.com") is False
+        assert _is_x_status_url("https://x.com/user") is False
+
+    def test_tweet_id_from_url(self):
+        """Tweet ID is extracted from status URL."""
+        assert _tweet_id_from_url("https://x.com/foo/status/1346889436626259968") == "1346889436626259968"
+        assert _tweet_id_from_url("https://twitter.com/bar/status/123/") == "123"
+        assert _tweet_id_from_url("https://example.com") is None
+
+    async def test_x_crawler_non_x_url_returns_error(self):
+        """Non-X URL returns failed CrawlResult with clear error."""
+        crawler = XCrawler()
+        result = await crawler.crawl("https://example.com/page", CrawlerConfig(provider="x"))
+        assert result.success is False
+        assert "not an X/Twitter status URL" in (result.error or "")
+        await crawler.close()
+
+    async def test_x_crawler_missing_token_returns_error(self):
+        """Missing Bearer token returns failed CrawlResult."""
+        crawler = XCrawler()
+        with patch("spiderweb.crawlers.x.settings") as mock_settings:
+            mock_settings.x_bearer_token = None
+            result = await crawler.crawl(
+                "https://x.com/user/status/123",
+                CrawlerConfig(provider="x", extra_config={}),
+            )
+        assert result.success is False
+        assert "Bearer token" in (result.error or "")
+        await crawler.close()
+
+    async def test_x_crawler_success_mocked(self):
+        """X crawler returns content when API returns tweet data."""
+        crawler = XCrawler()
+        payload = {
+            "data": {
+                "id": "1346889436626259968",
+                "text": "Hello from the API",
+                "author_id": "2244994945",
+                "created_at": "2021-01-01T12:00:00.000Z",
+            },
+            "includes": {
+                "users": [
+                    {"id": "2244994945", "username": "testuser", "name": "Test User"}
+                ]
+            },
+        }
+        config = CrawlerConfig(provider="x", extra_config={"x_bearer_token": "fake-token"})
+        with patch.object(crawler, "_fetch_tweet", new_callable=AsyncMock, return_value=payload):
+            result = await crawler.crawl("https://x.com/testuser/status/1346889436626259968", config)
+        assert result.success is True
+        assert "Hello from the API" in result.content
+        assert "Test User" in result.content
+        assert "@testuser" in result.content
+        assert result.metadata.get("tweet_id") == "1346889436626259968"
+        assert result.metadata.get("source_type") == "x_tweet"
+        await crawler.close()
+
+    async def test_x_crawler_search_mocked(self):
+        """search() returns list of CrawlResult from mocked search API."""
+        crawler = XCrawler()
+        config = CrawlerConfig(
+            provider="x",
+            extra_config={
+                "x_bearer_token": "fake-token",
+                "x_scraper_config": XScraperConfig(max_search_results=10, search_max_pages=1).model_dump(),
+            },
+        )
+        payload = {
+            "data": [
+                {
+                    "id": "1",
+                    "text": "Hello world",
+                    "author_id": "u1",
+                    "created_at": "2021-01-01T12:00:00.000Z",
+                }
+            ],
+            "includes": {"users": [{"id": "u1", "username": "alice", "name": "Alice"}]},
+            "meta": {},
+        }
+        with patch.object(crawler, "_search_tweets", new_callable=AsyncMock, return_value=payload):
+            results = await crawler.search("hello", config=config)
+        assert len(results) == 1
+        assert results[0].success is True
+        assert "Hello world" in results[0].content
+        await crawler.close()
+
+    async def test_x_crawler_scrape_user_mocked(self):
+        """scrape_user() returns XUserScrapeResult with user, followers, following."""
+        crawler = XCrawler()
+        config = CrawlerConfig(
+            provider="x",
+            extra_config={
+                "x_bearer_token": "fake-token",
+                "x_scraper_config": XScraperConfig(
+                    max_followers_per_user=5,
+                    max_following_per_user=5,
+                    include_followers=True,
+                    include_following=True,
+                    graph_depth=1,
+                ).model_dump(),
+            },
+        )
+        user = {"id": "u1", "username": "bob", "name": "Bob", "description": "Dev"}
+        followers_payload = {"data": [{"id": "f1", "username": "f1", "name": "F1"}], "meta": {}}
+        following_payload = {"data": [{"id": "g1", "username": "g1", "name": "G1"}], "meta": {}}
+        with patch.object(crawler, "_user_by_username", new_callable=AsyncMock, return_value=user), \
+             patch.object(crawler, "_user_followers", new_callable=AsyncMock, return_value=followers_payload), \
+             patch.object(crawler, "_user_following", new_callable=AsyncMock, return_value=following_payload):
+            result = await crawler.scrape_user("bob", config=config)
+        assert isinstance(result, XUserScrapeResult)
+        assert result.user["username"] == "bob"
+        assert len(result.followers) == 1
+        assert result.followers[0]["username"] == "f1"
+        assert len(result.following) == 1
+        assert result.following[0]["username"] == "g1"
+        crawl_results = result.to_crawl_results()
+        assert len(crawl_results) >= 1
+        assert "Bob" in crawl_results[0].content
+        assert crawl_results[0].metadata.get("source_type") == "x_user"
+        assert crawl_results[0].metadata.get("x_user_id") == "u1"
+        await crawler.close()
+
+    def test_get_x_scraper_config_default(self):
+        """_get_x_scraper_config returns default when extra_config has no x_scraper_config."""
+        config = CrawlerConfig(provider="x", extra_config={})
+        x_config = _get_x_scraper_config(config)
+        assert isinstance(x_config, XScraperConfig)
+        assert x_config.max_search_results == 100
+        assert x_config.graph_depth == 1
 
 
 class TestCrawlerConfig:

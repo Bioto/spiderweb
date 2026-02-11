@@ -72,6 +72,7 @@ results = await web.crawl_and_query(
 2. **Crawler Implementations**
    - `HttpCrawler` - Simple HTTP GET requests with aiohttp
    - `Crawl4AICrawler` - Advanced crawler with JavaScript rendering
+   - `XCrawler` - X (Twitter) API v2: status URLs, search (keywords/hashtags), user followers/following with depth control
    - Pluggable design for future crawlers
 
 3. **Extraction Layer** (`spiderweb.crawlers.extraction`)
@@ -101,7 +102,7 @@ URL → Crawler → CrawlResult → [Optional: Extractor] → Document → Pipel
 from spiderweb.models.config import CrawlerConfig
 
 config = CrawlerConfig(
-    provider="crawl4ai",           # "crawl4ai" or "http"
+    provider="crawl4ai",           # "crawl4ai", "http", or "x"
     max_depth=2,                   # Follow links N levels deep
     max_pages=20,                  # Limit total pages crawled
     follow_patterns=[r"docs/"],    # Regex patterns to follow
@@ -127,6 +128,110 @@ config = CrawlExtractionConfig(
     temperature=0.0,               # LLM temperature
 )
 ```
+
+### X (Twitter) scraper — search, hashtags, user graph
+
+The `x` crawler uses the X API v2 (pay-per-request). Set `SPIDERWEB_X_BEARER_TOKEN` or pass `extra_config["x_bearer_token"]`.
+
+**1. Search by keywords or hashtags**
+
+```python
+from spiderweb.crawlers import XCrawler
+from spiderweb.models.config import CrawlerConfig, XScraperConfig
+
+crawler = XCrawler()
+config = CrawlerConfig(
+    provider="x",
+    extra_config={
+        "x_bearer_token": "your-token",
+        "x_scraper_config": XScraperConfig(
+            max_search_results=50,
+            search_max_pages=2,
+            delay_between_requests=0.5,
+        ).model_dump(),
+    },
+)
+results = await crawler.search("python OR #python", config=config)
+# results is list[CrawlResult] — one per tweet; ingest as usual
+```
+
+**2. Scrape a user: profile, followers, following (with depth control)**
+
+```python
+x_config = XScraperConfig(
+    max_followers_per_user=100,
+    max_following_per_user=100,
+    include_followers=True,
+    include_following=True,
+    graph_depth=2,              # 1 = user + their list; 2+ = recurse into those users
+    max_users_per_level=50,     # cap per level to avoid explosion
+    delay_between_requests=0.5,
+)
+config = CrawlerConfig(
+    provider="x",
+    extra_config={
+        "x_bearer_token": "your-token",
+        "x_scraper_config": x_config.model_dump(),
+    },
+)
+scrape_result = await crawler.scrape_user("username", config=config)
+# scrape_result is XUserScrapeResult: .user, .followers, .following, .levels
+# Convert to CrawlResults for ingestion:
+for crawl_result in scrape_result.to_crawl_results():
+    # feed into your pipeline
+    ...
+```
+
+**XScraperConfig controls**
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `max_search_results` | 100 | Max tweets per search request (10–100) |
+| `search_max_pages` | 1 | Max pagination pages per search |
+| `max_followers_per_user` | 100 | Max followers to fetch per user (1–1000) |
+| `max_following_per_user` | 100 | Max following to fetch per user (1–1000) |
+| `include_followers` | True | Include followers when scraping a user |
+| `include_following` | True | Include following when scraping a user |
+| `graph_depth` | 1 | Levels deep (1 = user + list; 2+ = recurse) |
+| `max_users_per_level` | 50 | When depth > 1, max users to expand per level |
+| `delay_between_requests` | 0.5 | Seconds between API requests (rate limits) |
+
+### Parsing entities and topics from X (and scoping queries)
+
+X crawl results (tweets and user profiles) are tagged with `source_type` and IDs in metadata. When you ingest them with the **same pipeline as chunks** (chunking + LangExtract + entity-relations + graph store), entities and topics are extracted and stored. You can then **query and scope** by source.
+
+1. **Ingest X content with entity/topic extraction**
+
+   Use `ingest_x_crawl_results()` so each CrawlResult becomes a Document and runs through the full pipeline (including LangExtract and entity-relations add-ons). Enable add-ons when constructing Spiderweb (e.g. `chunk_add_ons=["langextract", "entity_entity_relations"]`) and pass a graph store so entities and relationships are written.
+
+   ```python
+   from spiderweb import Spiderweb
+   from spiderweb.crawlers import XCrawler
+   from spiderweb.models.config import CrawlerConfig, XScraperConfig
+
+   async with Spiderweb(
+       llm_client=llm,
+       chunk_add_ons=["langextract", "entity_entity_relations"],
+       graph_store=neo4j_store,
+   ) as web:
+       crawler = XCrawler()
+       config = CrawlerConfig(provider="x", extra_config={"x_bearer_token": "..."})
+       results = await crawler.search("#python", config=config)
+       batch = await web.ingest_x_crawl_results(results, crawler_name="XCrawler")
+   ```
+
+2. **Scope vector queries**
+
+   Chunks from X documents get `source_type`, `tweet_id`, `x_user_id`, etc. in `chunk.metadata.extra`. Use `filter_dict` when querying the vector store to scope to X only (e.g. `filter_dict={"source_type": "x_tweet"}` or `{"source_type": "x_user"}`), if your store supports it.
+
+3. **Scope graph queries**
+
+   Entities from X documents have the same attributes on the graph node. Use `list_entities(attributes_filter={"source_type": "x_tweet"})` or the CLI:
+
+   ```bash
+   spiderweb graph-query entities --graph-store neo4j://... --source-type x_tweet --limit 100
+   spiderweb graph-query entities --graph-store neo4j://... --attr source_type=x_user
+   ```
 
 ## API Reference
 
