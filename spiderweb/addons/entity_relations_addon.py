@@ -141,16 +141,15 @@ Limit to {self.max_relations} triples. Use consistent labels that match the enti
 
         try:
             try:
-                from gluellm.api import structured_complete
-
-                response = await structured_complete(
+                response = await self.llm_client.structured_complete(
                     user_message=prompt,
                     response_format=RelationshipsResponse,
-                    model=self.model or "default",
+                    model=self.model,
                     timeout=settings.llm_timeout,
                 )
-                triples = response.relationships[: self.max_relations] if response.relationships else []
-            except (ImportError, AttributeError, Exception):
+                data = getattr(response, "structured_output", response)
+                triples = (data.relationships or [])[: self.max_relations]
+            except (AttributeError, Exception):
                 triples = await self._extract_via_complete(prompt)
         except Exception as e:
             logger.warning("EntityEntityRelationsAddOn: LLM extraction failed: %s", e)

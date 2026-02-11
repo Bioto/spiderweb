@@ -217,7 +217,7 @@ class LangExtractAddOn:
     def __init__(
         self,
         llm_client: Any | None = None,
-        prompt_description: str = "",
+        prompt_description: str | None = None,
         examples: list[dict[str, Any]] | None = None,
         model_id: str = "gpt-4.1-mini",
         api_key: str | None = None,
@@ -229,10 +229,13 @@ class LangExtractAddOn:
         **kwargs: Any,
     ) -> None:
         self.llm_client = llm_client
-        # Default so CLI users get entity extraction without passing options
-        self.prompt_description = (prompt_description or "").strip() or (
-            "Extract named entities: people, organizations, places, dates, and key concepts from the text."
-        )
+        # Use default only when prompt_description is not provided (None); empty string means "skip"
+        if prompt_description is None:
+            self.prompt_description = (
+                "Extract named entities: people, organizations, places, dates, and key concepts from the text."
+            )
+        else:
+            self.prompt_description = (prompt_description or "").strip()
         self.examples_option = examples or []
         self.model_id = model_id
         self.api_key = api_key

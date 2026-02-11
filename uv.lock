@@ -4729,6 +4729,7 @@ all = [
     { name = "pytesseract" },
     { name = "python-docx" },
     { name = "python-pptx" },
+    { name = "tiktoken" },
     { name = "uvicorn", extra = ["standard"] },
 ]
 api = [
@@ -4764,6 +4765,9 @@ office = [
 pdf = [
     { name = "pdfminer-six" },
     { name = "pymupdf" },
+]
+tokenizer = [
+    { name = "tiktoken" },
 ]
 
 [package.metadata]
@@ -4802,11 +4806,12 @@ requires-dist = [
     { name = "rich", specifier = ">=14.2.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.14.10" },
     { name = "spacy", specifier = ">=3.8.0" },
-    { name = "spiderweb", extras = ["pdf", "office", "ocr", "mcp", "api", "langextract", "neo4j"], marker = "extra == 'all'" },
+    { name = "spiderweb", extras = ["pdf", "office", "ocr", "mcp", "api", "langextract", "neo4j", "tokenizer"], marker = "extra == 'all'" },
     { name = "tenacity", specifier = ">=9.0.0" },
+    { name = "tiktoken", marker = "extra == 'tokenizer'", specifier = ">=0.5.0" },
     { name = "uvicorn", extras = ["standard"], marker = "extra == 'api'", specifier = ">=0.32.0" },
 ]
-provides-extras = ["pdf", "office", "ocr", "mcp", "api", "langextract", "neo4j", "dev", "all"]
+provides-extras = ["pdf", "office", "ocr", "mcp", "api", "langextract", "neo4j", "tokenizer", "dev", "all"]
 
 [[package]]
 name = "sqlalchemy"
