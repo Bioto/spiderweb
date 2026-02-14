@@ -32,6 +32,7 @@ Spiderweb takes raw documents and transforms them into searchable, semantically 
 - **Quality gates** — deduplication and content quality validation, so you're not storing garbage
 - **Query expansion** — multi-query reformulation and HyDE with RRF fusion (for when simple queries aren't cutting it)
 - **Structured extraction** — Pydantic schemas for pulling structured data from web pages (because we're civilized)
+- **Metadata queries** — Extract document-level metadata (e.g. year, type) during chunking and filter RAG searches by it
 - **Vector store support** — Qdrant (local/cloud) and in-memory for development
 - **MCP + REST API** — expose everything to AI assistants or your own services
 - **Progressive RAG** — lazy-loading document processing for massive documents
@@ -345,6 +346,60 @@ async with Spiderweb(llm_client=GlueLLM(), chunk_addon_config=config) as web:
 
 ---
 
+## Metadata Queries (Structured Extraction for RAG Filtering)
+
+Extract document-level metadata during chunking using a Pydantic schema. Field names become metadata keys on every chunk, so you can filter RAG search (e.g. by year, document type). Works with file ingest and web crawling. Requires the Python API (schema/fields config); CLI does not support add-on options yet.
+
+```python
+from pydantic import BaseModel, Field
+from spiderweb.models.config import ChunkAddOnConfig
+
+class DocMetadata(BaseModel):
+    """Metadata to extract from each document for RAG filtering."""
+
+    doc_year: str = Field(description="What year is this document for? (e.g. 2024)")
+    doc_type: str | None = Field(
+        default=None,
+        description="Document type (e.g. report, contract, memo)",
+    )
+
+config = ChunkAddOnConfig(
+    enabled=["metadata_queries"],
+    options={
+        "metadata_queries": {
+            "schema": DocMetadata,
+            "use_markdown_content": True,
+        },
+    },
+)
+
+async with Spiderweb(llm_client=GlueLLM(), chunk_addon_config=config) as web:
+    # Works with ingest and crawl
+    result = await web.ingest("report.pdf")
+    # or: result = await web.crawl("https://example.com/report", ingest=True)
+
+    meta = result.document.metadata.extra.get("metadata_queries", {})
+    print(f"Extracted: {meta}")  # e.g. {"doc_year": "2024", "doc_type": "report"}
+
+# Later: filter RAG search by extracted metadata
+results = await web.query("revenue growth", filter_dict={"doc_year": "2024"}, top_k=5)
+```
+
+For config files (YAML/JSON) where you can't pass a Python class, use `fields` instead:
+
+```python
+options={
+    "metadata_queries": {
+        "fields": [
+            {"name": "doc_year", "description": "What year is this document for?"},
+            {"name": "doc_type", "description": "Document type (report, memo, etc.)"},
+        ],
+    },
+}
+```
+
+---
+
 ## CLI Reference
 
 Spiderweb includes a CLI for when you just want to get things done.
@@ -391,6 +446,9 @@ spiderweb ingest document.pdf --chunk-size 2000 --chunk-overlap 400
 
 # Ingest with OCR (for scanned PDFs)
 spiderweb ingest scanned.pdf --use-ocr
+
+# Ingest with chunk add-ons (langextract, entity_entity_relations)
+spiderweb ingest /path/to/docs --chunk-add-on langextract --chunk-add-on entity_entity_relations
 
 # Progressive RAG mode (summaries first, full content on-demand)
 spiderweb ingest large_document.pdf --progressive

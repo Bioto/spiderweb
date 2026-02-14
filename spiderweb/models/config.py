@@ -318,6 +318,43 @@ class LangExtractAddOnOptions(BaseModel):
     )
 
 
+class MetadataQueriesAddOnOptions(BaseModel):
+    """Options for the metadata_queries chunk add-on (Pydantic-structured extraction).
+
+    Extracts metadata from each document using a Pydantic schema. Field names become
+    keys in document/chunk metadata.extra for RAG filtering (e.g. filter_dict={"doc_year": "2024"}).
+
+    Pass as ChunkAddOnConfig.options["metadata_queries"].
+    """
+
+    schema_model: type[BaseModel] | None = Field(
+        default=None,
+        description="Pydantic model class defining fields to extract (code API). "
+        "Field descriptions guide the LLM. Cannot be set from YAML/JSON. "
+        "Pass as 'schema' in options dict (alias for schema_model).",
+    )
+    fields: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="For config/YAML: list of {name, description}. Builds a dynamic Pydantic model.",
+    )
+    model_id: str | None = Field(
+        default=None,
+        description="Override LLM model for metadata extraction.",
+    )
+    use_markdown_content: bool = Field(
+        default=True,
+        description="Use document.markdown_content instead of raw_content.",
+    )
+    max_chars: int | None = Field(
+        default=None,
+        ge=1,
+        le=1_000_000,
+        description="Truncate document to this many chars before extraction. None = full document.",
+    )
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+
 class BatchConfig(BaseModel):
     """Configuration for batch processing.
 

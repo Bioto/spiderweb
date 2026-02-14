@@ -8,9 +8,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from spiderweb.addons.base import ChunkAddOn
+from spiderweb.addons.entity_relations_addon import EntityEntityRelationsAddOn
 from spiderweb.addons.facts import FactsAddOn, FactsResponse
-from spiderweb.addons.langextract_addon import LangExtractAddOn
-from spiderweb.models.config import ChunkAddOnConfig, LangExtractAddOnOptions
+from spiderweb.addons.metadata_queries_addon import MetadataQueriesAddOn
+from spiderweb.models.config import ChunkAddOnConfig
 from spiderweb.models.document import Chunk, ChunkMetadata, ChunkType, Document, DocumentMetadata
 from spiderweb.registry import chunk_addon_registry
 
@@ -87,18 +88,6 @@ class TestChunkAddOnRegistry:
         """List all registered add-ons."""
         addons = chunk_addon_registry.list()
         assert "facts" in addons
-        assert "langextract" in addons
-
-    def test_create_langextract_addon_from_registry(self):
-        """Create LangExtract add-on instance from registry."""
-        addon = chunk_addon_registry.create(
-            "langextract",
-            prompt_description="Extract entities",
-            examples=[],
-        )
-        assert isinstance(addon, LangExtractAddOn)
-        assert addon.prompt_description == "Extract entities"
-        assert addon.model_id == "gpt-4.1-mini"
 
     def test_register_custom_addon(self):
         """Register a custom add-on."""
@@ -131,6 +120,175 @@ class TestChunkAddOnRegistry:
         assert isinstance(addon, FactsAddOn)
         assert addon.max_facts == 5
         assert addon.model == "gpt-4"
+
+    def test_entity_entity_relations_addon_registered(self):
+        """Entity/relations add-on is registered by default."""
+        assert "entity_entity_relations" in chunk_addon_registry
+
+    def test_create_entity_entity_relations_addon_from_registry(self):
+        """Create entity_entity_relations add-on instance from registry."""
+        mock_llm = MagicMock()
+        addon = chunk_addon_registry.create(
+            "entity_entity_relations", llm_client=mock_llm
+        )
+        assert isinstance(addon, EntityEntityRelationsAddOn)
+        assert addon.llm_client is mock_llm
+
+    def test_metadata_queries_addon_registered(self):
+        """Metadata queries add-on is registered by default."""
+        assert "metadata_queries" in chunk_addon_registry
+
+    def test_create_metadata_queries_addon_from_registry(self):
+        """Create metadata_queries add-on instance from registry with schema."""
+        from pydantic import BaseModel, Field
+
+        class DocMeta(BaseModel):
+            doc_year: str = Field(description="What year is this document for?")
+
+        mock_llm = MagicMock()
+        addon = chunk_addon_registry.create(
+            "metadata_queries",
+            llm_client=mock_llm,
+            schema=DocMeta,
+        )
+        assert isinstance(addon, MetadataQueriesAddOn)
+        assert addon.llm_client is mock_llm
+
+    def test_create_metadata_queries_addon_with_fields(self):
+        """Create metadata_queries add-on with fields (config API)."""
+        mock_llm = MagicMock()
+        addon = chunk_addon_registry.create(
+            "metadata_queries",
+            llm_client=mock_llm,
+            fields=[
+                {"name": "doc_year", "description": "What year is this doc for?"},
+            ],
+        )
+        assert isinstance(addon, MetadataQueriesAddOn)
+
+
+class TestEntityEntityRelationsAddOn:
+    """Tests for EntityEntityRelationsAddOn."""
+
+    def test_init_with_llm_client(self):
+        """Initialize with LLM client."""
+        mock_llm = MagicMock()
+        addon = EntityEntityRelationsAddOn(llm_client=mock_llm)
+        assert addon.llm_client is mock_llm
+
+    def test_init_with_options(self):
+        """Initialize with custom options."""
+        mock_llm = MagicMock()
+        addon = EntityEntityRelationsAddOn(
+            llm_client=mock_llm,
+            model="gpt-4",
+            max_relations=10,
+        )
+        assert addon.model == "gpt-4"
+        assert addon.max_relations == 10
+
+    def test_process_requires_async(self):
+        """Sync process() raises NotImplementedError."""
+        addon = EntityEntityRelationsAddOn(llm_client=MagicMock())
+        chunks = [_make_chunk()]
+        with pytest.raises(NotImplementedError):
+            addon.process(chunks)
+
+    @pytest.mark.asyncio
+    async def test_process_async_without_llm_skips(self):
+        """Process without LLM client skips extraction."""
+        addon = EntityEntityRelationsAddOn(llm_client=None)
+        doc = _make_document()
+        chunks = [_make_chunk("Test content")]
+        result = await addon.process_async(chunks, document=doc)
+        assert result == chunks
+        assert "relationships" not in doc.metadata.extra
+
+    @pytest.mark.asyncio
+    async def test_process_async_without_document_skips(self):
+        """Process without document skips extraction."""
+        addon = EntityEntityRelationsAddOn(llm_client=MagicMock())
+        chunks = [_make_chunk("Test content")]
+        result = await addon.process_async(chunks, document=None)
+        assert result == chunks
+
+    @pytest.mark.asyncio
+    async def test_process_async_extracts_relationships(self):
+        """Process extracts relationship triples and stores in document.metadata.extra."""
+        from spiderweb.addons.entity_relations_addon import (
+            RelationshipsResponse,
+            RelationTriple,
+        )
+
+        mock_llm = AsyncMock()
+        addon = EntityEntityRelationsAddOn(llm_client=mock_llm)
+        doc = _make_document("Technical doc about Feature A and Component B.")
+        chunks = [_make_chunk("Feature A uses Component B for auth.", 0)]
+        chunks[0].metadata.document_id = doc.id
+
+        with patch(
+            "gluellm.api.structured_complete",
+            new_callable=AsyncMock,
+        ) as mock_structured:
+            mock_structured.return_value = RelationshipsResponse(
+                relationships=[
+                    RelationTriple(
+                        source="Feature A",
+                        relation_type="uses",
+                        target="Component B",
+                    ),
+                ]
+            )
+
+            result = await addon.process_async(chunks, document=doc)
+
+        assert result == chunks
+        assert "relationships" in doc.metadata.extra
+        rels = doc.metadata.extra["relationships"]
+        assert len(rels) == 1
+        assert rels[0]["source_id"] == "Feature A"
+        assert rels[0]["relation_type"] == "uses"
+        assert rels[0]["target_id"] == "Component B"
+
+    @pytest.mark.asyncio
+    async def test_process_async_handles_errors_gracefully(self):
+        """Process handles LLM errors without breaking pipeline."""
+        mock_llm = AsyncMock()
+        addon = EntityEntityRelationsAddOn(llm_client=mock_llm)
+        doc = _make_document("Some content.")
+
+        with patch(
+            "gluellm.api.structured_complete",
+            new_callable=AsyncMock,
+        ) as mock_structured:
+            mock_structured.side_effect = Exception("LLM error")
+
+            chunks = [_make_chunk("Content.")]
+            result = await addon.process_async(chunks, document=doc)
+
+        assert result == chunks
+        assert doc.metadata.extra.get("relationships") == []
+
+
+class TestMetadataQueriesAddOn:
+    """Tests for MetadataQueriesAddOn."""
+
+    def test_init_requires_schema_or_fields(self):
+        """Init requires schema or fields."""
+        with pytest.raises(ValueError, match="schema.*or fields"):
+            MetadataQueriesAddOn(llm_client=MagicMock())
+
+    def test_process_requires_async(self):
+        """Sync process() raises NotImplementedError."""
+        from pydantic import BaseModel, Field
+
+        class DocMeta(BaseModel):
+            doc_year: str = Field(description="Year")
+
+        addon = MetadataQueriesAddOn(llm_client=MagicMock(), schema=DocMeta)
+        chunks = [_make_chunk()]
+        with pytest.raises(NotImplementedError):
+            addon.process(chunks)
 
 
 class TestFactsAddOn:
@@ -188,8 +346,7 @@ class TestFactsAddOn:
         mock_llm = AsyncMock()
         facts_response = FactsResponse(facts=["Fact 1", "Fact 2", "Fact 3"])
 
-        # Patch where it's imported from (facts.py does "from gluellm.api import structured_complete")
-        with patch("gluellm.api.structured_complete", new_callable=AsyncMock) as mock_structured:
+        with patch("spiderweb.addons.facts.structured_complete", new_callable=AsyncMock) as mock_structured:
             mock_structured.return_value = facts_response
 
             addon = FactsAddOn(llm_client=mock_llm, max_facts=10)
@@ -207,7 +364,7 @@ class TestFactsAddOn:
         mock_llm = AsyncMock()
         facts_response = FactsResponse(facts=[f"Fact {i}" for i in range(20)])
 
-        with patch("gluellm.api.structured_complete", new_callable=AsyncMock) as mock_structured:
+        with patch("spiderweb.addons.facts.structured_complete", new_callable=AsyncMock) as mock_structured:
             mock_structured.return_value = facts_response
 
             addon = FactsAddOn(llm_client=mock_llm, max_facts=5)
@@ -366,11 +523,8 @@ class TestDocumentProcessorIntegration:
         from spiderweb.pipeline.processor import DocumentProcessor
         from spiderweb.models.config import ChunkerConfig
 
-        # Register a failing add-on (accept **kwargs so registry.create() can pass llm_client etc.)
+        # Register a failing add-on
         class FailingAddOn:
-            def __init__(self, **kwargs):
-                pass
-
             async def process_async(self, chunks, **kwargs):
                 raise Exception("Add-on error")
 
@@ -435,82 +589,3 @@ class TestSpiderwebIntegration:
 
         # Verify config was created from list
         assert web.document_processor.chunk_addon_config.enabled == ["facts"]
-
-
-class TestLangExtractAddOn:
-    """Tests for LangExtractAddOn (optional langextract dependency)."""
-
-    def test_init_with_options(self):
-        """Initialize with options."""
-        addon = LangExtractAddOn(
-            prompt_description="Extract people and places",
-            examples=[{"text": "Alice met Bob.", "extractions": []}],
-            model_id="gemini-2.5-pro",
-            extraction_passes=2,
-        )
-        assert addon.prompt_description == "Extract people and places"
-        assert len(addon.examples_option) == 1
-        assert addon.model_id == "gemini-2.5-pro"
-        assert addon.extraction_passes == 2
-
-    def test_process_requires_async(self):
-        """Sync process() raises NotImplementedError."""
-        addon = LangExtractAddOn(prompt_description="Extract")
-        chunks = [_make_chunk()]
-        with pytest.raises(NotImplementedError):
-            addon.process(chunks)
-
-    @pytest.mark.asyncio
-    async def test_process_async_without_document_returns_chunks(self):
-        """Without document, process_async returns chunks unchanged."""
-        addon = LangExtractAddOn(prompt_description="Extract")
-        chunks = [_make_chunk()]
-        result = await addon.process_async(chunks, document=None)
-        assert result == chunks
-
-    @pytest.mark.asyncio
-    async def test_process_async_without_prompt_skips(self):
-        """Without prompt_description, add-on skips and returns chunks."""
-        addon = LangExtractAddOn(prompt_description="")
-        doc = _make_document("Some text.")
-        doc.chunks = [_make_chunk()]
-        chunks = doc.chunks
-        result = await addon.process_async(chunks, document=doc)
-        assert result == chunks
-        assert "langextract" not in doc.metadata.extra
-
-    @pytest.mark.asyncio
-    async def test_process_async_empty_document_skips(self):
-        """Empty document content skips extraction."""
-        addon = LangExtractAddOn(prompt_description="Extract entities")
-        doc = _make_document("")
-        doc.raw_content = ""
-        doc.markdown_content = ""
-        chunks = [_make_chunk()]
-        result = await addon.process_async(chunks, document=doc)
-        assert result == chunks
-
-
-class TestLangExtractAddOnOptions:
-    """Tests for LangExtractAddOnOptions config model."""
-
-    def test_defaults(self):
-        """Default options are sensible."""
-        opts = LangExtractAddOnOptions()
-        assert opts.prompt_description == ""
-        assert opts.model_id == "gpt-4.1-mini"
-        assert opts.extraction_passes == 2
-        assert opts.max_char_buffer == 2000
-        assert opts.attach_to_chunks is True
-
-    def test_model_dump_for_registry(self):
-        """Options can be dumped for ChunkAddOnConfig.options."""
-        opts = LangExtractAddOnOptions(
-            prompt_description="Extract dates",
-            examples=[{"text": "On Jan 1.", "extractions": []}],
-        )
-        d = opts.model_dump()
-        assert d["prompt_description"] == "Extract dates"
-        assert len(d["examples"]) == 1
-        addon = chunk_addon_registry.create("langextract", **d)
-        assert addon.prompt_description == "Extract dates"
