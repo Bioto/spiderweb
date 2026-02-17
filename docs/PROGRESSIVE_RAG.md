@@ -167,7 +167,7 @@ Uses an LLM to generate a 2-3 sentence summary. Higher quality but slower.
 ```python
 config = ProgressiveRAGConfig(
     summary_strategy=SummaryStrategy.LLM_SUMMARY,
-    llm_summary_model="openai:gpt-4o-mini",
+    llm_summary_model="openai:gpt-5.1",
 )
 ```
 

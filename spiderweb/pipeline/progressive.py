@@ -161,7 +161,7 @@ class ProgressiveRAGProcessor:
 
         if self.config.summary_strategy == SummaryStrategy.LLM_SUMMARY:
             # Use LLM to generate summary
-            model = self.config.llm_summary_model or "openai:gpt-4o-mini"
+            model = self.config.llm_summary_model or "openai:gpt-5.1"
             prompt = f"Summarize the following page (page {page_num}) in 2-3 sentences:\n\n{page_text[:2000]}"
 
             response = await self.llm_client.chat(

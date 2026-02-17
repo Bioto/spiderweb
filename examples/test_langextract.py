@@ -72,7 +72,7 @@ async def main() -> None:
     addon = LangExtractAddOn(
         prompt_description="Extract people, organizations, locations, job titles, skills, and contact info. Use extraction_class for type (e.g. Person, Organization, Skill).",
         examples=examples,
-        model_id="gpt-4.1-mini",
+        model_id="gpt-5.1",
         extraction_passes=1,
         max_workers=1,
         max_char_buffer=0,  # use full text

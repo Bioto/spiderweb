@@ -176,30 +176,34 @@ async def _research(
         sem = asyncio.Semaphore(effective_parallel) if effective_parallel > 0 else None
 
         async def run_one(q: str) -> SearchCrawlTrace:
-            if sem:
-                async with sem:
-                    return await web.search_crawl_extract(
-                        query=q,
-                        search_provider_config=search_config,
-                        crawler_config=crawler_config,
-                        depth_config=depth_config,
-                        ingest=ingest,
-                        save_to=save_to,
-                        save_format=save_format,
-                        save_trace_to=save_trace,
-                        trace_format=trace_format,
-                    )
-            return await web.search_crawl_extract(
-                query=q,
-                search_provider_config=search_config,
-                crawler_config=crawler_config,
-                depth_config=depth_config,
-                ingest=ingest,
-                save_to=save_to,
-                save_format=save_format,
-                save_trace_to=save_trace,
-                trace_format=trace_format,
-            )
+            try:
+                if sem:
+                    async with sem:
+                        return await web.search_crawl_extract(
+                            query=q,
+                            search_provider_config=search_config,
+                            crawler_config=crawler_config,
+                            depth_config=depth_config,
+                            ingest=ingest,
+                            save_to=save_to,
+                            save_format=save_format,
+                            save_trace_to=save_trace,
+                            trace_format=trace_format,
+                        )
+                return await web.search_crawl_extract(
+                    query=q,
+                    search_provider_config=search_config,
+                    crawler_config=crawler_config,
+                    depth_config=depth_config,
+                    ingest=ingest,
+                    save_to=save_to,
+                    save_format=save_format,
+                    save_trace_to=save_trace,
+                    trace_format=trace_format,
+                )
+            except Exception as e:
+                console.print(f"[yellow]⚠ Query failed (will continue): {q!r} — {e}[/yellow]")
+                return SearchCrawlTrace(original_query=q)
 
         if live_ui:
             from rich.live import Live
@@ -399,30 +403,34 @@ async def _goal(
         sem = asyncio.Semaphore(effective_parallel) if effective_parallel > 0 else None
 
         async def run_one(q: str) -> SearchCrawlTrace:
-            if sem:
-                async with sem:
-                    return await web.search_crawl_extract(
-                        query=q,
-                        search_provider_config=search_config,
-                        crawler_config=crawler_config,
-                        depth_config=depth_config,
-                        ingest=ingest,
-                        save_to=save_to,
-                        save_format=save_format,
-                        save_trace_to=save_trace,
-                        trace_format=trace_format,
-                    )
-            return await web.search_crawl_extract(
-                query=q,
-                search_provider_config=search_config,
-                crawler_config=crawler_config,
-                depth_config=depth_config,
-                ingest=ingest,
-                save_to=save_to,
-                save_format=save_format,
-                save_trace_to=save_trace,
-                trace_format=trace_format,
-            )
+            try:
+                if sem:
+                    async with sem:
+                        return await web.search_crawl_extract(
+                            query=q,
+                            search_provider_config=search_config,
+                            crawler_config=crawler_config,
+                            depth_config=depth_config,
+                            ingest=ingest,
+                            save_to=save_to,
+                            save_format=save_format,
+                            save_trace_to=save_trace,
+                            trace_format=trace_format,
+                        )
+                return await web.search_crawl_extract(
+                    query=q,
+                    search_provider_config=search_config,
+                    crawler_config=crawler_config,
+                    depth_config=depth_config,
+                    ingest=ingest,
+                    save_to=save_to,
+                    save_format=save_format,
+                    save_trace_to=save_trace,
+                    trace_format=trace_format,
+                )
+            except Exception as e:
+                console.print(f"[yellow]⚠ Query failed (will continue): {q!r} — {e}[/yellow]")
+                return SearchCrawlTrace(original_query=q)
 
         if live_ui:
             from rich.live import Live

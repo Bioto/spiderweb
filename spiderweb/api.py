@@ -53,6 +53,7 @@ def parse_graph_store_url(url: str) -> GraphStoreConfig:
 
     Args:
         url: URL in format "neo4j://user:password@host:7687" or "neo4j://host:7687"
+             Also accepts TLS variants: neo4j+s, neo4j+ssc, bolt+s, bolt+ssc.
 
     Returns:
         GraphStoreConfig for the parsed URL.
@@ -60,9 +61,13 @@ def parse_graph_store_url(url: str) -> GraphStoreConfig:
     if "://" not in url:
         raise ValueError(f"Invalid graph store URL format: {url}")
 
-    provider, rest = url.split("://", 1)
-    if provider not in ("neo4j", "bolt"):
-        raise ValueError(f"Unsupported graph store provider: {provider}")
+    scheme, rest = url.split("://", 1)
+    _SUPPORTED_SCHEMES = {"neo4j", "neo4j+s", "neo4j+ssc", "bolt", "bolt+s", "bolt+ssc"}
+    if scheme not in _SUPPORTED_SCHEMES:
+        raise ValueError(
+            f"Unsupported graph store scheme: {scheme}. "
+            f"Supported schemes: {sorted(_SUPPORTED_SCHEMES)}"
+        )
 
     username = "neo4j"
     password = ""
@@ -82,7 +87,8 @@ def parse_graph_store_url(url: str) -> GraphStoreConfig:
         host = host_port
         port = 7687
 
-    uri = f"bolt://{host}:{port}"
+    # Preserve the original scheme so TLS (+s/+ssc) and routing (neo4j://) are retained
+    uri = f"{scheme}://{host}:{port}"
     return GraphStoreConfig(
         provider="neo4j",
         uri=uri,
