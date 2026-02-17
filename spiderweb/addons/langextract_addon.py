@@ -219,7 +219,7 @@ class LangExtractAddOn:
         llm_client: Any | None = None,
         prompt_description: str | None = None,
         examples: list[dict[str, Any]] | None = None,
-        model_id: str = "gpt-4.1-mini",
+        model_id: str = "gpt-5.1",
         api_key: str | None = None,
         extraction_passes: int = 2,
         max_workers: int = 4,

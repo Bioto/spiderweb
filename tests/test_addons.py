@@ -65,10 +65,10 @@ class TestChunkAddOnConfig:
         """Configure add-on specific options."""
         config = ChunkAddOnConfig(
             enabled=["facts"],
-            options={"facts": {"max_facts": 5, "model": "gpt-4"}},
+            options={"facts": {"max_facts": 5, "model": "gpt-5.1"}},
         )
         assert config.options["facts"]["max_facts"] == 5
-        assert config.options["facts"]["model"] == "gpt-4"
+        assert config.options["facts"]["model"] == "gpt-5.1"
 
     def test_empty_options_dict(self):
         """Options dict defaults to empty."""
@@ -98,7 +98,7 @@ class TestChunkAddOnRegistry:
         )
         assert isinstance(addon, LangExtractAddOn)
         assert addon.prompt_description == "Extract entities"
-        assert addon.model_id == "gpt-4.1-mini"
+        assert addon.model_id == "gpt-5.1"
 
     def test_register_custom_addon(self):
         """Register a custom add-on."""
@@ -126,11 +126,11 @@ class TestChunkAddOnRegistry:
             "facts",
             llm_client=mock_llm,
             max_facts=5,
-            model="gpt-4",
+            model="gpt-5.1",
         )
         assert isinstance(addon, FactsAddOn)
         assert addon.max_facts == 5
-        assert addon.model == "gpt-4"
+        assert addon.model == "gpt-5.1"
 
 
 class TestFactsAddOn:
@@ -145,9 +145,9 @@ class TestFactsAddOn:
     def test_init_with_options(self):
         """Initialize with custom options."""
         mock_llm = MagicMock()
-        addon = FactsAddOn(llm_client=mock_llm, max_facts=5, model="gpt-4")
+        addon = FactsAddOn(llm_client=mock_llm, max_facts=5, model="gpt-5.1")
         assert addon.max_facts == 5
-        assert addon.model == "gpt-4"
+        assert addon.model == "gpt-5.1"
 
     def test_process_requires_async(self):
         """Sync process() raises NotImplementedError."""
@@ -498,7 +498,7 @@ class TestLangExtractAddOnOptions:
         """Default options are sensible."""
         opts = LangExtractAddOnOptions()
         assert opts.prompt_description == ""
-        assert opts.model_id == "gpt-4.1-mini"
+        assert opts.model_id == "gpt-5.1"
         assert opts.extraction_passes == 2
         assert opts.max_char_buffer == 2000
         assert opts.attach_to_chunks is True

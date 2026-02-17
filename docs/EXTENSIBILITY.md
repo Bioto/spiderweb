@@ -237,7 +237,7 @@ config = ChunkAddOnConfig(
     options={
         "facts": {
             "max_facts": 10,
-            "model": "gpt-4",
+            "model": "gpt-5.1",
         }
     }
 )
@@ -280,7 +280,7 @@ class EntityExtractionAddOn:
 chunk_addon_registry.register("entities", EntityExtractionAddOn)
 
 # Or use a factory for complex initialization
-def create_entity_addon(llm_client=None, model="gpt-4", **kwargs):
+def create_entity_addon(llm_client=None, model="gpt-5.1", **kwargs):
     return EntityExtractionAddOn(llm_client=llm_client, model=model)
 
 chunk_addon_registry.register_factory("entities", create_entity_addon)
