@@ -63,7 +63,7 @@ class SpiderwebSettings(BaseSettings):
         description="Embedding vector dimension",
     )
     model: str | None = Field(
-        default="openai:gpt-5.1",
+        default="openai:gpt-5.2-2025-12-11",
         description="Default LLM model for chat/completion. Used by research and other LLM calls. When None, GlueLLM uses its own default.",
     )
     llm_timeout: float = Field(
