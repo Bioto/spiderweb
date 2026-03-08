@@ -232,7 +232,7 @@ class ChunkAddOnConfig(BaseModel):
         # Enable multiple add-ons with options
         config = ChunkAddOnConfig(
             enabled=["facts", "entities"],
-            options={"facts": {"max_facts": 10, "model": "gpt-4"}}
+            options={"facts": {"max_facts": 10, "model": "gpt-5.1"}}
         )
     """
 
@@ -271,8 +271,8 @@ class LangExtractAddOnOptions(BaseModel):
         "are list of {extraction_class, extraction_text, attributes}.",
     )
     model_id: str = Field(
-        default="gpt-4.1-mini",
-        description="LangExtract model id (default gpt-4.1-mini; or gemini-2.5-flash, Ollama gemma2:2b, etc.).",
+        default="gpt-5.1",
+        description="LangExtract model id (default gpt-5.1; or gemini-2.5-flash, Ollama gemma2:2b, etc.).",
     )
     api_key: str | None = Field(
         default=None,
@@ -1128,7 +1128,7 @@ class ResearchAgentConfig(BaseModel):
     )
     model: str | None = Field(
         default=None,
-        description="Override LLM model for this research run (e.g. openai:gpt-4o-mini). When None, uses global default from settings.",
+        description="Override LLM model for this research run (e.g. openai:gpt-5.1). When None, uses global default from settings.",
     )
 
     model_config = ConfigDict(

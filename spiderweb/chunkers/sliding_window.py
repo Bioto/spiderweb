@@ -98,6 +98,12 @@ class SlidingWindowChunker:
                 current_chunk = overlap_text
                 current_length = overlap_length
 
+            if sentence_length > self.max_chunk_size and not current_chunk:
+                # Single sentence exceeds max size — force-split into sub-chunks
+                for start in range(0, sentence_length, self.max_chunk_size):
+                    chunks.append(sentence[start : start + self.max_chunk_size])
+                continue
+
             current_chunk.append(sentence)
             current_length += sentence_length
 

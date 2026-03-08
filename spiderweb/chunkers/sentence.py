@@ -83,6 +83,10 @@ class SentenceChunker:
                 chunks.append(chunk_text)
                 current_chunk = [sentence]
                 current_length = sentence_length
+            elif sentence_length > self.max_chunk_size and not current_chunk:
+                # Single sentence exceeds max size — force-split into sub-chunks
+                for start in range(0, sentence_length, self.max_chunk_size):
+                    chunks.append(sentence[start : start + self.max_chunk_size])
             else:
                 current_chunk.append(sentence)
                 current_length += sentence_length

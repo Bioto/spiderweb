@@ -196,7 +196,7 @@ class DocumentProcessor:
         # OpenAI embedding models use cl100k_base; other providers may vary
         if "text-embedding-3" in model or "text-embedding-ada" in model or "embedding" in model.lower():
             try:
-                return tiktoken.encoding_for_model("gpt-4")  # cl100k_base
+                return tiktoken.encoding_for_model("gpt-5.1")  # cl100k_base
             except Exception:
                 return tiktoken.get_encoding("cl100k_base")
         return None
