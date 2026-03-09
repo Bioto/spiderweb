@@ -110,6 +110,11 @@ tokenizer = [
     "tiktoken>=0.5.0",
 ]
 
+# RSS crawler
+rss = [
+    "feedparser>=6.0.0",
+]
+
 # Development dependencies
 dev = [
     "pytest>=8.0.0",
@@ -122,7 +127,7 @@ dev = [
 
 # All optional features
 all = [
-    "spiderweb[pdf,office,ocr,mcp,api,langextract,neo4j,tokenizer]",
+    "spiderweb[pdf,office,ocr,mcp,api,langextract,neo4j,tokenizer,rss]",
 ]
 
 [project.urls]

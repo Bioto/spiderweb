@@ -12,6 +12,10 @@ from spiderweb.crawlers.base import Crawler, CrawlResult
 from spiderweb.crawlers.crawl4ai import Crawl4AICrawler
 from spiderweb.crawlers.extraction import CrawlExtractor
 from spiderweb.crawlers.http import HttpCrawler
+from spiderweb.crawlers.hn import HNCrawler
+from spiderweb.crawlers.reddit import RedditCrawler
+from spiderweb.crawlers.rss import RSSCrawler
+from spiderweb.crawlers.x import XCrawler, XUserScrapeResult
 from spiderweb.registry import crawler_registry
 
 __all__ = [
@@ -20,10 +24,19 @@ __all__ = [
     "HttpCrawler",
     "Crawl4AICrawler",
     "CrawlExtractor",
+    "HNCrawler",
+    "RedditCrawler",
+    "RSSCrawler",
+    "XCrawler",
+    "XUserScrapeResult",
 ]
 
 # Register built-in crawlers
 # These names correspond to CrawlerConfig.provider values
 crawler_registry.register("http", HttpCrawler)
 crawler_registry.register("crawl4ai", Crawl4AICrawler)
+crawler_registry.register("x", XCrawler)
+crawler_registry.register("reddit", RedditCrawler)
+crawler_registry.register("hn", HNCrawler)
+crawler_registry.register("rss", RSSCrawler)
 

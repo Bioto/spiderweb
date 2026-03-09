@@ -243,6 +243,20 @@ class SpiderwebSettings(BaseSettings):
         description="Default maximum concurrent crawl requests",
     )
 
+    # Reddit crawler credentials (OAuth)
+    reddit_client_id: str | None = Field(
+        default=None,
+        description="Reddit API client ID for the 'reddit' crawler. Set SPIDERWEB_REDDIT_CLIENT_ID.",
+    )
+    reddit_client_secret: str | None = Field(
+        default=None,
+        description="Reddit API client secret for the 'reddit' crawler. Set SPIDERWEB_REDDIT_CLIENT_SECRET.",
+    )
+    reddit_user_agent: str = Field(
+        default="spiderweb:v0.1 (by /u/spiderweb_bot)",
+        description="Reddit API user agent. Set SPIDERWEB_REDDIT_USER_AGENT.",
+    )
+
     # Search depth settings
     default_max_search_rounds: int = Field(
         default=1,

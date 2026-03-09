@@ -831,6 +831,194 @@ class CrawlerConfig(BaseModel):
     )
 
 
+class XScraperConfig(BaseModel):
+    """Configuration for X (Twitter) scraper: search, user graph, and depth controls.
+
+    Used with the 'x' crawler for search_tweets(), scrape_user(), and related
+    operations. Pass via CrawlerConfig(provider='x', extra_config={'x_scraper_config': ...})
+    or directly to XCrawler.search() / XCrawler.scrape_user().
+    """
+
+    # Search (keywords and hashtags)
+    max_search_results: int = Field(
+        default=100,
+        ge=10,
+        le=100,
+        description="Max tweets per search request (API cap 100 for recent search)",
+    )
+    include_parent_tweet: bool = Field(
+        default=True,
+        description="When a search result is a reply, fetch the parent tweet and include it in results (entire post)",
+    )
+    search_max_pages: int = Field(
+        default=1,
+        ge=1,
+        le=10,
+        description="Max pagination pages per search (each page up to max_search_results)",
+    )
+
+    # User graph (followers / following)
+    max_followers_per_user: int = Field(
+        default=100,
+        ge=1,
+        le=1000,
+        description="Max followers to fetch per user per request (API cap 1000)",
+    )
+    max_following_per_user: int = Field(
+        default=100,
+        ge=1,
+        le=1000,
+        description="Max following to fetch per user per request (API cap 1000)",
+    )
+    include_followers: bool = Field(
+        default=True,
+        description="When scraping a user, include their followers list",
+    )
+    include_following: bool = Field(
+        default=True,
+        description="When scraping a user, include their following list",
+    )
+
+    # User timeline (tweets)
+    include_tweets: bool = Field(
+        default=False,
+        description="When scraping a user, include their recent tweets (timeline)",
+    )
+    max_tweets_per_user: int = Field(
+        default=10,
+        ge=0,
+        le=100,
+        description="Max tweets to fetch per user when include_tweets is True (0 = off, API cap 100 per request)",
+    )
+
+    # Depth control (how many "levels" of accounts to traverse)
+    graph_depth: int = Field(
+        default=1,
+        ge=1,
+        le=5,
+        description="How many levels deep to traverse (1 = user only + their followers/following; 2+ = recurse into those users)",
+    )
+    max_users_per_level: int = Field(
+        default=50,
+        ge=1,
+        le=1000,
+        description="When graph_depth > 1, max users to expand per level (to avoid explosion)",
+    )
+
+    # Rate limiting
+    delay_between_requests: float = Field(
+        default=0.5,
+        ge=0.0,
+        le=10.0,
+        description="Seconds to wait between X API requests (respect rate limits)",
+    )
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "max_search_results": 50,
+                "graph_depth": 2,
+                "max_users_per_level": 20,
+                "include_followers": True,
+                "include_following": True,
+            }
+        }
+    )
+
+
+class RedditScraperConfig(BaseModel):
+    """Configuration for Reddit scraper: search, user submissions, and options.
+
+    Used with the 'reddit' crawler. Pass via CrawlerConfig(provider='reddit',
+    extra_config={'reddit_scraper_config': ...}).
+    """
+
+    max_results: int = Field(
+        default=100,
+        ge=1,
+        le=1000,
+        description="Maximum submissions to fetch per search or user scrape",
+    )
+    sort: Literal["new", "hot", "top", "rising", "relevance"] = Field(
+        default="new",
+        description="Sort order for submissions",
+    )
+    time_filter: Literal["hour", "day", "week", "month", "year", "all"] = Field(
+        default="week",
+        description="Time filter for top/controversial (when sort=top)",
+    )
+    include_comments: bool = Field(
+        default=False,
+        description="Include comment bodies when fetching submissions",
+    )
+    max_comments: int = Field(
+        default=10,
+        ge=0,
+        le=500,
+        description="Max comments to include per submission when include_comments is True",
+    )
+    delay_between_requests: float = Field(
+        default=1.0,
+        ge=0.0,
+        le=10.0,
+        description="Seconds to wait between Reddit API requests (respect rate limits)",
+    )
+
+
+class HNScraperConfig(BaseModel):
+    """Configuration for Hacker News scraper: search and user submissions.
+
+    Used with the 'hn' crawler. Pass via CrawlerConfig(provider='hn',
+    extra_config={'hn_scraper_config': ...}).
+    """
+
+    max_results: int = Field(
+        default=100,
+        ge=1,
+        le=1000,
+        description="Maximum items to fetch per search or user scrape",
+    )
+    include_comments: bool = Field(
+        default=False,
+        description="Include comment bodies when fetching stories",
+    )
+    max_comments: int = Field(
+        default=10,
+        ge=0,
+        le=500,
+        description="Max comments to include per story when include_comments is True",
+    )
+    search_type: Literal["story", "comment", "all"] = Field(
+        default="story",
+        description="Type of items to return from search (story, comment, or all)",
+    )
+    delay_between_requests: float = Field(
+        default=1.0,
+        ge=0.0,
+        le=10.0,
+        description="Seconds to wait between HN API requests (be polite)",
+    )
+
+
+class RSSScraperConfig(BaseModel):
+    """Configuration for RSS feed scraper.
+
+    Used with the 'rss' crawler. Pass via CrawlerConfig(provider='rss',
+    extra_config={'rss_scraper_config': ...}).
+    """
+
+    max_entries: int = Field(
+        default=50,
+        ge=1,
+        le=500,
+        description="Maximum entries to fetch per feed",
+    )
+    include_summary: bool = Field(
+        default=True,
+        description="Include entry summary/content in the CrawlResult body",
+    )
+
+
 class CrawlExtractionConfig(BaseModel):
     """Configuration for LLM-powered structured extraction from crawled content.
     
