@@ -890,6 +890,37 @@ class XScraperConfig(BaseModel):
     )
 
 
+class OpenSkyConfig(BaseModel):
+    """Configuration for OpenSky Network flight tracking crawler.
+
+    Used with the 'opensky' crawler. Pass via CrawlerConfig(provider='opensky',
+    extra_config={'opensky_config': ...}) or directly to OpenSkyCrawler.search().
+    """
+
+    delay_between_requests: float = Field(
+        default=1.0,
+        ge=0.0,
+        le=10.0,
+        description="Seconds to wait between OpenSky API requests (respect rate limits)",
+    )
+    fetch_flight_history: bool = Field(
+        default=True,
+        description="When tracking icao24, also fetch flight history (last 2 days)",
+    )
+    history_lookback_hours: int = Field(
+        default=48,
+        ge=1,
+        le=48,
+        description="Hours of flight history to fetch for icao24 queries. OpenSky API max is 48.",
+    )
+    departures_arrivals_lookback_hours: int = Field(
+        default=24,
+        ge=1,
+        le=168,
+        description="Hours to look back for departures/arrivals queries",
+    )
+
+
 class CrawlExtractionConfig(BaseModel):
     """Configuration for LLM-powered structured extraction from crawled content.
     

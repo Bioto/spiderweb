@@ -246,6 +246,14 @@ class SpiderwebSettings(BaseSettings):
         default=None,
         description="X (Twitter) API Bearer token for the 'x' crawler (pay-per-request). Set SPIDERWEB_X_BEARER_TOKEN.",
     )
+    opensky_client_id: str | None = Field(
+        default=None,
+        description="OpenSky Network API OAuth2 client ID. Set SPIDERWEB_OPENSKY_CLIENT_ID for authenticated access.",
+    )
+    opensky_client_secret: str | None = Field(
+        default=None,
+        description="OpenSky Network API OAuth2 client secret. Set SPIDERWEB_OPENSKY_CLIENT_SECRET.",
+    )
 
     # Search depth settings
     default_max_search_rounds: int = Field(
