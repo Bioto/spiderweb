@@ -243,6 +243,12 @@ class SpiderwebSettings(BaseSettings):
         description="Default maximum concurrent crawl requests",
     )
 
+    # X (Twitter) crawler credentials (Bearer token / OAuth 2.0 App-only)
+    x_bearer_token: str | None = Field(
+        default=None,
+        description="X API v2 Bearer token for the 'x' crawler. Set SPIDERWEB_X_BEARER_TOKEN.",
+    )
+
     # Reddit crawler credentials (OAuth)
     reddit_client_id: str | None = Field(
         default=None,

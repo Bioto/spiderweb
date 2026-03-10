@@ -6,8 +6,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from spiderweb.crawlers.base import CrawlResult
 from spiderweb.crawlers.http import HttpCrawler
 from spiderweb.crawlers.extraction import CrawlExtractor
+from spiderweb.crawlers.x import XCrawler, XUserScrapeResult, _get_x_scraper_config, _is_x_status_url, _tweet_id_from_url
 from spiderweb.loaders.web_loader import WebLoader
-from spiderweb.models.config import CrawlerConfig, CrawlExtractionConfig
+from spiderweb.models.config import CrawlerConfig, CrawlExtractionConfig, XScraperConfig
 from pydantic import BaseModel
 
 
