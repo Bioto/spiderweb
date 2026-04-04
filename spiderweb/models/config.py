@@ -705,6 +705,15 @@ class CrawlerConfig(BaseModel):
         default_factory=list,
         description="Regex patterns for links to exclude",
     )
+    restrict_to_start_domains: bool = Field(
+        default=True,
+        description=(
+            "When True, link-following is restricted to the registered domains "
+            "(eTLD+1) of the seed URLs. Prevents the crawler from wandering to "
+            "external sites when crawling a specific URL or site. "
+            "Set to False for broad multi-site crawls."
+        ),
+    )
     respect_robots_txt: bool = Field(
         default=True,
         description="Respect robots.txt directives",
@@ -724,6 +733,12 @@ class CrawlerConfig(BaseModel):
         ge=1,
         le=300,
         description="Request timeout in seconds",
+    )
+    overall_timeout_seconds: int = Field(
+        default=60,
+        ge=10,
+        le=300,
+        description="Hard cap on total time per page including scrolling/scanning. Kills runaway scroll loops.",
     )
     extract_markdown: bool = Field(
         default=True,
@@ -766,7 +781,108 @@ class CrawlerConfig(BaseModel):
             "exclude_external_links, etc.). For 'x' provider, use x_bearer_token and optionally x_scraper_config (XScraperConfig.model_dump())."
         ),
     )
-    
+
+    # --- Browser process tuning (crawl4ai BrowserConfig) ---
+    browser_light_mode: bool = Field(
+        default=False,
+        description=(
+            "Disable background browser features (crawl4ai light_mode). "
+            "Quickest win for reducing CPU on constrained systems."
+        ),
+    )
+    browser_text_mode: bool = Field(
+        default=False,
+        description="Disable image and media loading for leaner, faster crawls.",
+    )
+    browser_config: dict[str, Any] = Field(
+        default_factory=dict,
+        description=(
+            "Additional crawl4ai BrowserConfig kwargs passed at browser launch "
+            "(e.g. extra_args, viewport_width, java_script_enabled, sleep_on_close). "
+            "Keys here override browser_light_mode / browser_text_mode if duplicated."
+        ),
+    )
+
+    # --- Per-page crawl behaviour (crawl4ai CrawlerRunConfig) ---
+    wait_until: Literal["domcontentloaded", "load", "networkidle"] = Field(
+        default="domcontentloaded",
+        description=(
+            "Navigation-complete signal. "
+            "'domcontentloaded' is fastest; 'networkidle' waits for all network "
+            "activity to settle (needed for heavy SPAs but much slower)."
+        ),
+    )
+    scan_full_page: bool = Field(
+        default=False,
+        description=(
+            "Auto-scroll the page to trigger lazy-loaded / infinite-scroll content "
+            "before extracting. Slower but necessary for some dynamic pages."
+        ),
+    )
+    scroll_delay: float = Field(
+        default=0.2,
+        ge=0.0,
+        le=10.0,
+        description="Seconds to pause between scroll steps when scan_full_page=True.",
+    )
+    max_scroll_steps: int | None = Field(
+        default=None,
+        ge=1,
+        description=(
+            "Maximum scroll iterations when scan_full_page=True. "
+            "None = scroll until the full page is loaded."
+        ),
+    )
+
+    # --- Content targeting and filtering (crawl4ai CrawlerRunConfig) ---
+    css_selector: str | None = Field(
+        default=None,
+        description=(
+            "CSS selector to restrict extraction to a specific part of the page "
+            "(e.g. 'main', 'article', '#content'). Everything outside is discarded."
+        ),
+    )
+    excluded_tags: list[str] = Field(
+        default_factory=list,
+        description=(
+            "HTML tags to strip before extraction "
+            "(e.g. ['nav', 'footer', 'aside', 'script', 'style']). "
+            "Reduces noise in the extracted content."
+        ),
+    )
+    word_count_threshold: int | None = Field(
+        default=None,
+        ge=0,
+        description=(
+            "Minimum word count for a text block to be included. "
+            "Blocks below this threshold are discarded. "
+            "None = crawl4ai's built-in default (~200 words)."
+        ),
+    )
+    exclude_external_links: bool = Field(
+        default=False,
+        description="Strip links pointing outside the current domain from extracted content.",
+    )
+    remove_overlay_elements: bool = Field(
+        default=False,
+        description="Attempt to remove modal dialogs and popup overlays before extracting.",
+    )
+    remove_consent_popups: bool = Field(
+        default=False,
+        description=(
+            "Attempt to dismiss GDPR / cookie-consent banners before extracting "
+            "(tries 'Accept All' then falls back to DOM removal)."
+        ),
+    )
+    block_ads: bool = Field(
+        default=True,
+        description=(
+            "Block ad networks, trackers, and analytics requests via Playwright route filtering. "
+            "Also blocks fonts and media. Reduces page load time and prevents ad/tracker scripts "
+            "from preventing the 'load' event from firing on forum/listing pages."
+        ),
+    )
+
     # Crawl relevance filtering
     crawl_relevance_prompt: str | None = Field(
         default=None,
@@ -792,6 +908,39 @@ class CrawlerConfig(BaseModel):
                 "delay_between_requests": 1.0,
             }
         }
+    )
+
+
+def low_resource_crawler_config(**overrides: Any) -> CrawlerConfig:
+    """Return a CrawlerConfig pre-tuned to minimise CPU and memory usage.
+
+    Preset:
+    - light_mode + text_mode: disables background features and image loading
+    - --disable-gpu / --disable-dev-shm-usage: suppress GPU process and /dev/shm OOM
+    - domcontentloaded: fastest page-complete signal
+    - scan_full_page=False / excluded_tags for nav noise: lean extraction
+    - Small viewport: less rendering work per page
+
+    Any CrawlerConfig keyword argument overrides the preset.
+
+    Example:
+        >>> config = low_resource_crawler_config(max_concurrent=1, css_selector="article")
+    """
+    return CrawlerConfig(
+        provider="crawl4ai",
+        browser_light_mode=True,
+        browser_text_mode=True,
+        browser_config={
+            "extra_args": ["--disable-gpu", "--disable-dev-shm-usage"],
+            "viewport_width": 800,
+            "viewport_height": 600,
+        },
+        wait_until="domcontentloaded",
+        scan_full_page=False,
+        excluded_tags=["nav", "footer", "aside", "script", "style"],
+        remove_overlay_elements=True,
+        remove_consent_popups=True,
+        **overrides,
     )
 
 
@@ -1108,7 +1257,7 @@ class ResearchAgentConfig(BaseModel):
         description="Maximum queries the LLM may suggest per batch (initial or expansion). The LLM decides how many to use up to this limit.",
     )
     max_parallel_crawls: int = Field(
-        default=5,
+        default=10,
         ge=1,
         le=10,
         description="Maximum concurrent search-crawl executions per batch (caps memory use when many queries are run).",
@@ -1118,6 +1267,12 @@ class ResearchAgentConfig(BaseModel):
         ge=100,
         le=50000,
         description="Maximum characters per page when aggregating for report synthesis",
+    )
+    max_chars_per_page_for_extraction: int = Field(
+        default=25000,
+        ge=1000,
+        le=50000,
+        description="Maximum characters per page when extracting listings (higher than report cap for aggregation pages).",
     )
     query_generation_prompt_template: str | None = Field(
         default=None,
@@ -1162,13 +1317,32 @@ class ResearchAgentConfig(BaseModel):
         description="Override LLM model for this research run (e.g. openai:gpt-5.1). When None, uses global default from settings.",
     )
 
+    # Iterative listing search settings
+    target_listings: int | None = Field(
+        default=None,
+        description="Stop searching when this many valid listings are found. None = no target (run all queries once).",
+    )
+    max_search_rounds: int = Field(
+        default=5,
+        ge=1,
+        le=20,
+        description="Maximum search rounds before giving up when target_listings is set.",
+    )
+    queries_per_round: int = Field(
+        default=10,
+        ge=1,
+        le=20,
+        description="Number of queries to execute per round when using iterative search.",
+    )
+
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
                 "num_queries": 5,
                 "max_queries": 50,
-                "max_parallel_crawls": 5,
+                "max_parallel_crawls": 10,
                 "max_chars_per_page_for_report": 4000,
+                "max_chars_per_page_for_extraction": 25000,
                 "max_expansion_rounds": 3,
                 "expansion_context_max_chars": 12000,
                 "cache_dir": None,

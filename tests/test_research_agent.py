@@ -1,8 +1,10 @@
 """Tests for research agent: spill to store, aggregate_traces_for_report, batched summarization."""
 
+import asyncio
 import tempfile
 from pathlib import Path
-from unittest.mock import AsyncMock
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -10,11 +12,17 @@ from spiderweb.crawlers.base import CrawlResult
 from spiderweb.research.agent import (
     _iter_page_contents,
     aggregate_traces_for_report,
+    create_research_plan,
     spill_trace_content_to_dir,
     spill_trace_to_store,
     summarize_content_batch,
     summarize_traces_in_batches,
     synthesize_report_from_summaries,
+)
+from spiderweb.research.models import (
+    DEFAULT_REPORT_FORMAT_INSTRUCTIONS,
+    PipelineType,
+    ResearchPlan,
 )
 from spiderweb.research.storage import MarkdownResearchStore
 from spiderweb.search.base import SearchResultBatch
@@ -285,6 +293,22 @@ class TestSynthesizeReportFromSummaries:
         assert "Synthesized" in out
         mock_llm.complete.assert_called_once()
 
+    @pytest.mark.asyncio
+    async def test_custom_report_format_instructions_in_prompt(self):
+        """Custom report_format_instructions appear in the synthesis prompt."""
+        mock_llm = AsyncMock()
+        mock_llm.complete.return_value = type("R", (), {"final_response": "ok"})()
+        custom = "Output a plain markdown bullet list only. No headers."
+        await synthesize_report_from_summaries(
+            mock_llm,
+            persona="Analyst",
+            instructions="Research topic",
+            batch_summaries=["S1"],
+            report_format_instructions=custom,
+        )
+        user_message = mock_llm.complete.call_args.kwargs["user_message"]
+        assert custom in user_message
+
 
 class TestSummarizeTracesInBatches:
     """Tests for summarize_traces_in_batches."""
@@ -316,3 +340,52 @@ class TestSummarizeTracesInBatches:
         assert len(summaries) == 4  # 3+3+3+1
         assert all(s == "Batch summary." for s in summaries)
         assert mock_llm.complete.call_count == 4
+
+
+class TestCreateResearchPlan:
+    """Regression: gluellm structured_complete returns ExecutionResult, not the Pydantic model."""
+
+    def test_create_research_plan_unwraps_execution_result(self):
+        expected = ResearchPlan(
+            queries=["q1", "q2"],
+            report_focus="Focus text",
+            rationale=None,
+        )
+        exec_like = SimpleNamespace(structured_output=expected, final_response="")
+        mock_llm = MagicMock()
+
+        with patch("gluellm.api.structured_complete", new_callable=AsyncMock, return_value=exec_like):
+            plan = asyncio.run(create_research_plan(mock_llm, goal="test goal"))
+
+        assert plan.queries == ["q1", "q2"]
+        assert plan.report_focus == "Focus text"
+        assert plan.report_format_instructions == DEFAULT_REPORT_FORMAT_INSTRUCTIONS
+        assert plan.search_strategy is not None
+        assert plan.search_strategy.validate_url_liveness is True
+        assert plan.pipeline == PipelineType.narrative
+
+
+class TestPipelineType:
+    """Listing vs narrative is chosen via ResearchPlan.pipeline (LLM), not goal-string heuristics."""
+
+    def test_default_is_narrative(self):
+        p = ResearchPlan(queries=["q"], report_focus="x")
+        assert p.pipeline == PipelineType.narrative
+
+    def test_listing_pipeline_explicit(self):
+        p = ResearchPlan(
+            queries=["q"],
+            report_focus="x",
+            pipeline=PipelineType.listing,
+        )
+        assert p.pipeline == PipelineType.listing
+
+    def test_legacy_use_listing_extraction_maps_to_pipeline(self):
+        p = ResearchPlan.model_validate(
+            {
+                "queries": ["q"],
+                "report_focus": "x",
+                "use_listing_extraction": True,
+            }
+        )
+        assert p.pipeline == PipelineType.listing

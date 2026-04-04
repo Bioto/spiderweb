@@ -3,6 +3,7 @@
 import json
 import tempfile
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -190,7 +191,9 @@ class TestFactsAddOn:
 
         # Patch where it's imported from (facts.py does "from gluellm.api import structured_complete")
         with patch("gluellm.api.structured_complete", new_callable=AsyncMock) as mock_structured:
-            mock_structured.return_value = facts_response
+            mock_structured.return_value = SimpleNamespace(
+                structured_output=facts_response, final_response=""
+            )
 
             addon = FactsAddOn(llm_client=mock_llm, max_facts=10)
             chunks = [_make_chunk("Test content with facts.")]
@@ -208,7 +211,9 @@ class TestFactsAddOn:
         facts_response = FactsResponse(facts=[f"Fact {i}" for i in range(20)])
 
         with patch("gluellm.api.structured_complete", new_callable=AsyncMock) as mock_structured:
-            mock_structured.return_value = facts_response
+            mock_structured.return_value = SimpleNamespace(
+                structured_output=facts_response, final_response=""
+            )
 
             addon = FactsAddOn(llm_client=mock_llm, max_facts=5)
             chunks = [_make_chunk("Test content.")]

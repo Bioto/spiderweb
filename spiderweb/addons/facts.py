@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 from spiderweb.addons.base import ChunkAddOn
 from spiderweb.config import settings
 from spiderweb.observability.logging_config import get_logger
+from spiderweb.utils.gluellm_structured import model_from_structured_complete
 
 if TYPE_CHECKING:
     from spiderweb.models.document import Chunk, Document
@@ -138,13 +139,14 @@ Limit to {self.max_facts} facts maximum."""
             try:
                 from gluellm.api import structured_complete
                 
-                response = await structured_complete(
+                raw = await structured_complete(
                     user_message=prompt,
                     response_format=FactsResponse,
                     model=self.model,
                     timeout=settings.llm_timeout,
                 )
-                facts = response.facts[:self.max_facts] if response.facts else []
+                parsed = model_from_structured_complete(raw, FactsResponse)
+                facts = parsed.facts[:self.max_facts] if parsed.facts else []
                 return facts
             except (ImportError, AttributeError, Exception) as e:
                 logger.debug(f"structured_complete not available, falling back to complete(): {e}")

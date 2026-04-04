@@ -1,6 +1,7 @@
 """Tests for adaptive chunking agent."""
 
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -50,7 +51,7 @@ class TestChooseChunkingStrategy:
         )
 
         async def mock_structured_complete(*args, **kwargs):
-            return mock_choice
+            return SimpleNamespace(structured_output=mock_choice, final_response="")
 
         mock_llm = AsyncMock()
         with patch("gluellm.api.structured_complete", side_effect=mock_structured_complete):

@@ -37,7 +37,7 @@ classifiers = [
 
 dependencies = [
     # Core LLM and embedding capabilities
-    "gluellm>=1.1.0",
+    "gluellm>=1.2.5",
     # Document processing
     "markitdown[all]>=0.0.1a2",
     "aiofiles>=24.1.0",

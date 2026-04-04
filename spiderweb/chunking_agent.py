@@ -15,6 +15,7 @@ from spiderweb.config import settings
 from spiderweb.models.config import ChunkerConfig
 from spiderweb.observability.logging_config import get_logger
 from spiderweb.registry import chunker_registry
+from spiderweb.utils.gluellm_structured import model_from_structured_complete
 
 logger = get_logger(__name__)
 
@@ -100,12 +101,13 @@ Return your choice as JSON with "strategy" (one of: hierarchical, semantic, sent
         try:
             from gluellm.api import structured_complete
             
-            choice = await structured_complete(
+            raw = await structured_complete(
                 user_message=prompt,
                 response_format=ChunkerChoice,
                 model=model,
                 timeout=settings.llm_timeout,
             )
+            choice = model_from_structured_complete(raw, ChunkerChoice)
             logger.debug(f"Selected chunking strategy '{choice.strategy}' for {file_name}: {choice.rationale}")
             return choice
         except (ImportError, AttributeError, Exception) as e:

@@ -30,6 +30,12 @@ console = Console()
     help="Search provider backend. Default: duckduckgo.",
 )
 @click.option(
+    "--recency",
+    type=click.Choice(["d", "w", "m", "y"]),
+    default=None,
+    help="Filter by recency (duckduckgo timelimit): d (day), w (week), m (month), y (year). Default: none.",
+)
+@click.option(
     "--limit",
     type=int,
     default=10,
@@ -152,6 +158,7 @@ console = Console()
 def search_cmd(
     query: str,
     search_provider: str,
+    recency: str | None,
     limit: int,
     crawl_provider: str,
     max_rounds: int,
@@ -201,6 +208,7 @@ def search_cmd(
         _search(
             query,
             search_provider,
+            recency,
             limit,
             crawl_provider,
             max_rounds,
@@ -228,6 +236,7 @@ def search_cmd(
 async def _search(
     query: str,
     search_provider: str,
+    recency: str | None,
     limit: int,
     crawl_provider: str,
     max_rounds: int,
@@ -262,6 +271,7 @@ async def _search(
     search_config = SearchProviderConfig(
         provider=search_provider,
         limit=limit,
+        extra_config={"timelimit": recency} if recency else {},
     )
     
     depth_config = SearchDepthConfig(
@@ -310,6 +320,8 @@ async def _search(
             console.print("[bold yellow]CRAZY mode: no limits — press Ctrl+C to stop[/bold yellow]")
         console.print(f"[cyan]Searching: {query}[/cyan]")
         console.print(f"  Search provider: {search_provider}")
+        if recency:
+            console.print(f"  Recency: [green]{recency}[/green] (d=day, w=week, m=month, y=year)")
         console.print(f"  Max rounds: {max_rounds}")
         console.print(f"  Crawl per round: {crawl_per_round}")
         console.print(f"  Strategy: {when_deeper}")

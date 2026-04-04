@@ -76,10 +76,11 @@ from spiderweb.models.config import (
     ValidatorConfig,
     VectorStoreConfig,
     XScraperConfig,
+    low_resource_crawler_config,
 )
 from spiderweb.models.graph import Entity, Relationship
 from spiderweb.stores.graph_base import GraphStore
-from spiderweb.research.models import GoalResult, ResearchPlan, ResearchReportResult
+from spiderweb.research.models import GoalResult, ResearchPlan, ResearchReportResult, SearchStrategy
 from spiderweb.registry import (
     ComponentRegistry,
     chunk_addon_registry,
@@ -124,6 +125,7 @@ __all__ = [
     "QueryExpansionConfig",
     "ResearchAgentConfig",
     "CrawlerConfig",
+    "low_resource_crawler_config",
     "CrawlExtractionConfig",
     "XScraperConfig",
     "SearchProviderConfig",
@@ -132,6 +134,7 @@ __all__ = [
     "ResearchPlan",
     "ResearchReportResult",
     "GoalResult",
+    "SearchStrategy",
     # Search
     "SearchProvider",
     "SearchResult",

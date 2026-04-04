@@ -4,6 +4,7 @@ Provides a loader for web URLs that mirrors the FileLoader pattern,
 integrating crawling and extraction into the document pipeline.
 """
 
+import inspect
 from typing import TYPE_CHECKING, Union
 
 if TYPE_CHECKING:
@@ -65,7 +66,11 @@ class WebLoader:
             # Look up crawler class in registry
             if provider in crawler_registry:
                 crawler_cls = crawler_registry.get(provider)
-                self.crawler = crawler_cls()
+                sig = inspect.signature(crawler_cls.__init__)
+                if "crawler_config" in sig.parameters:
+                    self.crawler = crawler_cls(crawler_config=self.crawler_config)
+                else:
+                    self.crawler = crawler_cls()
             else:
                 # Fallback warning and use crawl4ai
                 logger.warning(
@@ -73,7 +78,8 @@ class WebLoader:
                     f"Available: {crawler_registry.list()}"
                 )
                 from spiderweb.crawlers.crawl4ai import Crawl4AICrawler
-                self.crawler = Crawl4AICrawler()
+
+                self.crawler = Crawl4AICrawler(crawler_config=self.crawler_config)
         
         # Initialize extractor if enabled and LLM client provided
         if self.extraction_config.enabled and llm_client:

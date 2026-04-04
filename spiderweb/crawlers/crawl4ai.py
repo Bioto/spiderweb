@@ -69,6 +69,69 @@ def _is_pdf_url(url: str) -> bool:
     return path.endswith(".pdf") or ".pdf" in query
 
 
+def _registered_domain(url: str) -> str:
+    """Return a coarse eTLD+1 (e.g. 'rennlist.com') for a URL, or netloc if unavailable."""
+    netloc = urlparse(url).netloc.lower().split(":")[0]
+    parts = netloc.split(".")
+    if len(parts) >= 2:
+        return ".".join(parts[-2:])
+    return netloc
+
+
+# Well-known ad networks, analytics, and tracker domains.
+# Requests to these hosts (or any subdomain) are aborted when block_ads=True.
+_AD_BLOCKER_DOMAINS: frozenset[str] = frozenset({
+    # Google ads / analytics
+    "doubleclick.net", "googlesyndication.com", "googletagmanager.com",
+    "googletagservices.com", "google-analytics.com", "analytics.google.com",
+    "adservice.google.com",
+    # Social / Meta
+    "facebook.net", "connect.facebook.net", "ads.twitter.com",
+    # Amazon / Yahoo / programmatic
+    "amazon-adsystem.com", "ads.yahoo.com", "advertising.com",
+    "adsrvr.org", "adnxs.com", "rubiconproject.com", "pubmatic.com",
+    "openx.net", "casalemedia.com", "yieldmo.com", "criteo.com",
+    "media.net", "moatads.com",
+    # Content recommendation
+    "taboola.com", "outbrain.com",
+    # Analytics / session recording
+    "hotjar.com", "fullstory.com", "mixpanel.com",
+    "segment.io", "segment.com", "amplitude.com", "heap.io",
+    # Customer messaging / support widgets
+    "intercom.io", "intercomcdn.com",
+    # Monitoring beacons
+    "newrelic.com", "nr-data.net",
+    # Other common trackers
+    "scorecardresearch.com", "quantserve.com",
+})
+
+# Resource types that are never useful for text crawling.
+_AD_BLOCKER_RESOURCE_TYPES: frozenset[str] = frozenset({"font", "media"})
+
+
+def _make_ad_block_hook():
+    """Return an on_page_context_created hook that blocks ads and trackers."""
+    async def _on_page_context_created(page, context, **kwargs):
+        async def _route_handler(route):
+            resource_type = route.request.resource_type
+            if resource_type in _AD_BLOCKER_RESOURCE_TYPES:
+                await route.abort()
+                return
+            try:
+                host = urlparse(route.request.url).netloc.lower()
+                if any(host == d or host.endswith("." + d) for d in _AD_BLOCKER_DOMAINS):
+                    await route.abort()
+                    return
+            except Exception:
+                pass
+            await route.continue_()
+
+        await context.route("**/*", _route_handler)
+        return page
+
+    return _on_page_context_created
+
+
 class Crawl4AICrawler:
     """Advanced web crawler using crawl4ai.
     
@@ -81,27 +144,43 @@ class Crawl4AICrawler:
         >>> result = await crawler.crawl("https://example.com", config)
         >>> print(result.markdown)
     """
-    
-    def __init__(self):
-        """Initialize Crawl4AI crawler."""
+
+    def __init__(self, crawler_config: CrawlerConfig | None = None):
+        """Initialize Crawl4AI crawler.
+
+        Args:
+            crawler_config: Optional default crawler config used for browser launch
+                (BrowserConfig) and as the base for run config mapping.
+        """
         self._crawler = None
+        self._crawler_config = crawler_config
         logger.debug("Initialized Crawl4AICrawler")
-    
+
     async def _get_crawler(self):
         """Get or create crawl4ai crawler instance.
-        
+
         Returns:
             Crawl4AI AsyncWebCrawler instance
         """
         if self._crawler is None:
             try:
-                from crawl4ai import AsyncWebCrawler
-                self._crawler = AsyncWebCrawler()
-                await self._crawler.__aenter__()
+                from crawl4ai import AsyncWebCrawler, BrowserConfig
             except ImportError:
                 raise ImportError(
                     "crawl4ai is not installed. Install it with: pip install crawl4ai"
                 )
+            browser_cfg_dict: dict[str, Any] = {}
+            if self._crawler_config:
+                if self._crawler_config.browser_light_mode:
+                    browser_cfg_dict["light_mode"] = True
+                if self._crawler_config.browser_text_mode:
+                    browser_cfg_dict["text_mode"] = True
+                browser_cfg_dict.update(self._crawler_config.browser_config)
+            browser_cfg = (
+                BrowserConfig(**browser_cfg_dict) if browser_cfg_dict else BrowserConfig()
+            )
+            self._crawler = AsyncWebCrawler(config=browser_cfg)
+            await self._crawler.__aenter__()
         return self._crawler
     
     async def close(self) -> None:
@@ -203,19 +282,36 @@ class Crawl4AICrawler:
             "js_code": ["window.scrollTo(0, document.body.scrollHeight);"] if config.wait_for_js else None,
             # Preserve current behavior: bypass cache
             "cache_mode": CacheMode.BYPASS,
+            # Crawl behaviour (CrawlerRunConfig)
+            "wait_until": config.wait_until,
+            "scan_full_page": config.scan_full_page,
+            "scroll_delay": config.scroll_delay,
+            "semaphore_count": config.max_concurrent,
+            # Content targeting / filtering
+            "exclude_external_links": config.exclude_external_links,
+            "remove_overlay_elements": config.remove_overlay_elements,
+            "remove_consent_popups": config.remove_consent_popups,
         }
-        
+        if config.max_scroll_steps is not None:
+            run_config_dict["max_scroll_steps"] = config.max_scroll_steps
+        if config.css_selector is not None:
+            run_config_dict["css_selector"] = config.css_selector
+        if config.excluded_tags:
+            run_config_dict["excluded_tags"] = config.excluded_tags
+        if config.word_count_threshold is not None:
+            run_config_dict["word_count_threshold"] = config.word_count_threshold
+
         # Map user_agent only if provided (crawl4ai's run config has user_agent field)
         if config.user_agent:
             run_config_dict["user_agent"] = config.user_agent
-        
+
         # Map headers and cookies if provided
         if config.headers:
             run_config_dict["headers"] = config.headers
         if config.cookies:
             # crawl4ai expects cookies as a dict or CookieJar
             run_config_dict["cookies"] = config.cookies
-        
+
         # Merge extra_config (allows power users to override or add any CrawlerRunConfig field)
         run_config_dict.update(config.extra_config)
         
@@ -240,10 +336,13 @@ class Crawl4AICrawler:
             "page_timeout": config.timeout_seconds * 1000,
             "cache_mode": CacheMode.BYPASS,
             "scraping_strategy": pdf_scraping_strategy,
-            # SEC.gov and similar sites return 403 without a proper User-Agent
-            "user_agent": config.user_agent or _DEFAULT_PDF_USER_AGENT,
+            # Never pass user_agent into CrawlerRunConfig for PDFs: crawl4ai's AsyncWebCrawler
+            # calls crawler_strategy.update_user_agent(), which PDFCrawlerStrategy does not
+            # implement (raises AttributeError). Custom UA is applied via
+            # _download_pdf_with_user_agent for SEC.gov; other PDFs use the strategy's fetch.
         }
         run_config_dict.update(config.extra_config)
+        run_config_dict.pop("user_agent", None)
         run_config = CrawlerRunConfig.from_kwargs(run_config_dict)
 
         user_agent = config.user_agent or _DEFAULT_PDF_USER_AGENT
@@ -270,8 +369,29 @@ class Crawl4AICrawler:
 
         try:
             logger.info("Crawling PDF with Crawl4AI: %s", url)
-            async with AsyncWebCrawler(crawler_strategy=pdf_crawler_strategy) as pdf_crawler:
-                result = await pdf_crawler.arun(url=crawl_url, config=run_config)
+            try:
+                async with asyncio.timeout(config.overall_timeout_seconds):
+                    async with AsyncWebCrawler(crawler_strategy=pdf_crawler_strategy) as pdf_crawler:
+                        result = await pdf_crawler.arun(url=crawl_url, config=run_config)
+            except asyncio.TimeoutError:
+                if temp_path:
+                    try:
+                        Path(temp_path).unlink(missing_ok=True)
+                    except OSError:
+                        pass
+                logger.warning(
+                    "Hard timeout (%ds) reached for PDF %s",
+                    config.overall_timeout_seconds,
+                    url,
+                )
+                return CrawlResult(
+                    url=url,
+                    content="",
+                    raw_html=None,
+                    status_code=0,
+                    success=False,
+                    error=f"Overall timeout ({config.overall_timeout_seconds}s) exceeded for PDF",
+                )
             if temp_path:
                 try:
                     Path(temp_path).unlink(missing_ok=True)
@@ -318,8 +438,32 @@ class Crawl4AICrawler:
     async def _crawl_page(self, url: str, config: CrawlerConfig) -> CrawlResult:
         """Fetch a single HTML page (shared logic for non-PDF crawl)."""
         crawler = await self._get_crawler()
+        # Register (or clear) the ad-block hook on the shared strategy singleton so
+        # that the setting in effect for this crawl call wins.
+        if config.block_ads:
+            crawler.crawler_strategy.set_hook(
+                "on_page_context_created", _make_ad_block_hook()
+            )
+        else:
+            crawler.crawler_strategy.set_hook("on_page_context_created", None)
         run_config = self._build_run_config(config)
-        result = await crawler.arun(url=url, config=run_config)
+        try:
+            async with asyncio.timeout(config.overall_timeout_seconds):
+                result = await crawler.arun(url=url, config=run_config)
+        except asyncio.TimeoutError:
+            logger.warning(
+                "Hard timeout (%ds) reached for %s - scan/scroll may have hung",
+                config.overall_timeout_seconds,
+                url,
+            )
+            return CrawlResult(
+                url=url,
+                content="",
+                raw_html=None,
+                status_code=0,
+                success=False,
+                error=f"Overall timeout ({config.overall_timeout_seconds}s) exceeded",
+            )
         html = result.html or ""
         markdown = result.markdown or ""
         links = self._extract_links(html, url)
@@ -407,6 +551,18 @@ class Crawl4AICrawler:
         if not urls:
             return []
 
+        allowed_domains: frozenset[str] = frozenset()
+        if config.restrict_to_start_domains and config.max_depth > 1:
+            allowed_domains = frozenset(
+                d for u in urls if (d := _registered_domain(u.strip()))
+            )
+
+        def _should_follow_scoped(link_url: str) -> bool:
+            if allowed_domains:
+                if _registered_domain(link_url) not in allowed_domains:
+                    return False
+            return self._should_follow_link(link_url, config)
+
         results: list[CrawlResult] = []
         visited: set[str] = set()
         to_crawl: list[tuple[str, int]] = [(u.strip(), 1) for u in urls]  # (url, depth)
@@ -442,7 +598,7 @@ class Crawl4AICrawler:
                 # Add links for following if within depth limit
                 if result.success and depth < config.max_depth:
                     for link in result.links:
-                        if link not in visited and self._should_follow_link(link, config):
+                        if link not in visited and _should_follow_scoped(link):
                             # Only add if we haven't hit the page limit
                             if len(results) + len(to_crawl) < config.max_pages:
                                 to_crawl.append((link, depth + 1))

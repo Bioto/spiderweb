@@ -4,6 +4,7 @@ This module provides the main API functions for working with Spiderweb,
 following the same patterns as gluellm for a consistent user experience.
 """
 
+import asyncio
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, overload
 
@@ -14,6 +15,7 @@ if TYPE_CHECKING:
 
 from spiderweb.config import settings
 from spiderweb.crawlers.base import CrawlResult
+from spiderweb.crawlers.url_validation import partition_urls_by_liveness
 from spiderweb.hooks import hooks as global_hooks
 from spiderweb.loaders.web_loader import WebLoader, crawl_result_to_document
 from spiderweb.models.config import (
@@ -26,6 +28,7 @@ from spiderweb.models.config import (
     HybridConfig,
     QueryExpansionConfig,
     RerankConfig,
+    ResearchAgentConfig,
     SearchDepthConfig,
     SearchProviderConfig,
     ValidatorConfig,
@@ -40,7 +43,18 @@ from spiderweb.pipeline.processor import DocumentProcessor
 from spiderweb.pipeline.query_expansion import QueryExpander, reciprocal_rank_fusion
 from spiderweb.registry import chunker_registry, crawler_registry, extractor_registry, search_provider_registry
 from spiderweb.search.base import SearchResult, SearchResultBatch
+from spiderweb.research.models import GoalResult, SearchStrategy
+from spiderweb.search.content_filter import (
+    detect_stale_content,
+    page_content_for_filtering,
+    passes_required_patterns,
+)
+from spiderweb.search.domain_filter import (
+    partition_results_by_blocked_domains,
+    sort_results_by_preferred_domains,
+)
 from spiderweb.search.relevance import filter_by_relevance
+from spiderweb.search.strategy_query import augment_search_query
 from spiderweb.search.trace import FilteredCandidate, PageRecord, SearchCrawlTrace, SearchRound
 from spiderweb.search.writers import write_trace
 from spiderweb.utils.path_utils import sanitize_query_for_path
@@ -1098,6 +1112,7 @@ class Spiderweb:
         save_format: str | None = None,
         save_trace_to: str | Path | None = None,
         trace_format: Literal["json", "markdown", "jsonl"] | None = None,
+        search_strategy: SearchStrategy | None = None,
     ) -> SearchCrawlTrace:
         """Search the web, crawl results, and optionally extract structured data.
         
@@ -1117,7 +1132,9 @@ class Spiderweb:
             save_format: Format for saved files - "markdown", "html", "json", or "all"
             save_trace_to: Optional path to save search-crawl trace
             trace_format: Format for trace file (json, markdown, or jsonl)
-            
+            search_strategy: Optional agent-generated strategy (goal-driven research) for
+                domain blocking, URL liveness checks, stale-content patterns, and query augmentation.
+
         Returns:
             SearchCrawlTrace containing full session flow
             
@@ -1144,15 +1161,15 @@ class Spiderweb:
             trace_format = settings.default_trace_format
         
         # Create trace
-        trace = SearchCrawlTrace(
-            original_query=query,
-            config_snapshot={
-                "search_provider": search_config.provider,
-                "max_rounds": depth_config.max_search_rounds,
-                "crawl_per_round": depth_config.crawl_results_per_round,
-                "when_to_go_deeper": depth_config.when_to_go_deeper,
-            },
-        )
+        snapshot: dict = {
+            "search_provider": search_config.provider,
+            "max_rounds": depth_config.max_search_rounds,
+            "crawl_per_round": depth_config.crawl_results_per_round,
+            "when_to_go_deeper": depth_config.when_to_go_deeper,
+        }
+        if search_strategy is not None:
+            snapshot["search_strategy"] = search_strategy.model_dump()
+        trace = SearchCrawlTrace(original_query=query, config_snapshot=snapshot)
         
         # Initialize search provider
         try:
@@ -1238,10 +1255,15 @@ class Spiderweb:
             round_search_results = []
             
             for search_query in queries_to_try:
-                logger.info(f"  Searching: {search_query}")
+                effective_query = (
+                    augment_search_query(search_query, search_strategy)
+                    if search_strategy is not None
+                    else search_query
+                )
+                logger.info(f"  Searching: {effective_query}")
                 # Search
                 search_results = await search_provider.search(
-                    search_query,
+                    effective_query,
                     limit=search_config.limit,
                     **search_config.extra_config,
                 )
@@ -1254,7 +1276,22 @@ class Spiderweb:
                 if result.url not in seen_urls and result.url not in all_crawled_urls:
                     seen_urls.add(result.url)
                     unique_results.append(result)
-            
+
+            if search_strategy is not None and search_strategy.blocked_domains:
+                allowed, domain_filtered = partition_results_by_blocked_domains(
+                    unique_results,
+                    search_strategy.blocked_domains,
+                    source_query=current_query,
+                )
+                round_filtered.extend(domain_filtered)
+                unique_results = allowed
+
+            if search_strategy is not None and search_strategy.preferred_domains:
+                unique_results = sort_results_by_preferred_domains(
+                    unique_results,
+                    search_strategy.preferred_domains,
+                )
+
             # Apply relevance filter if configured
             candidates_to_crawl = unique_results
             if crawler_config.crawl_relevance_prompt:
@@ -1318,6 +1355,26 @@ class Spiderweb:
                     valid_pairs.append((r, u))
             candidates_to_crawl = [c for c, _ in valid_pairs]
             urls_to_crawl = [u for _, u in valid_pairs]
+
+            if search_strategy is not None and search_strategy.validate_url_liveness and urls_to_crawl:
+                head_timeout = float(min(max(crawler_config.timeout_seconds, 3), 15))
+                live_urls, dead_pairs = await partition_urls_by_liveness(
+                    urls_to_crawl,
+                    timeout=head_timeout,
+                )
+                dead_set = {u for u, _ in dead_pairs}
+                for dead_url, reason in dead_pairs:
+                    round_filtered.append(
+                        FilteredCandidate(
+                            url=dead_url,
+                            source_query=current_query,
+                            filter_reason=f"url_not_live: {reason}",
+                        )
+                    )
+                valid_pairs = [(c, u) for c, u in valid_pairs if u not in dead_set]
+                candidates_to_crawl = [c for c, _ in valid_pairs]
+                urls_to_crawl = [u for _, u in valid_pairs]
+
             if not urls_to_crawl:
                 logger.info("No valid URLs to crawl in this round (all empty or missing)")
                 round_data = SearchRound(
@@ -1349,7 +1406,57 @@ class Spiderweb:
                 summary = None
                 if crawl_result.markdown:
                     summary = crawl_result.markdown[:500] + "..." if len(crawl_result.markdown) > 500 else crawl_result.markdown
-                
+
+                if search_strategy is not None:
+                    body = page_content_for_filtering(crawl_result)
+                    is_stale, stale_pat = detect_stale_content(
+                        body,
+                        url,
+                        search_strategy.stale_content_patterns,
+                    )
+                    if is_stale:
+                        round_filtered.append(
+                            FilteredCandidate(
+                                url=url,
+                                title=candidate.title if isinstance(candidate, SearchResult) else None,
+                                snippet=(
+                                    (candidate.description or candidate.snippet)
+                                    if isinstance(candidate, SearchResult)
+                                    else None
+                                ),
+                                source_query=current_query,
+                                source_position=(
+                                    candidate.position if isinstance(candidate, SearchResult) else None
+                                ),
+                                filter_reason=f"stale_content: {stale_pat}",
+                            )
+                        )
+                        all_crawled_urls.add(url)
+                        continue
+                    req_ok, req_reason = passes_required_patterns(
+                        body,
+                        search_strategy.required_content_patterns,
+                    )
+                    if not req_ok:
+                        round_filtered.append(
+                            FilteredCandidate(
+                                url=url,
+                                title=candidate.title if isinstance(candidate, SearchResult) else None,
+                                snippet=(
+                                    (candidate.description or candidate.snippet)
+                                    if isinstance(candidate, SearchResult)
+                                    else None
+                                ),
+                                source_query=current_query,
+                                source_position=(
+                                    candidate.position if isinstance(candidate, SearchResult) else None
+                                ),
+                                filter_reason=req_reason or "required_pattern_mismatch",
+                            )
+                        )
+                        all_crawled_urls.add(url)
+                        continue
+
                 # Extract structured data if configured
                 extracted_data = None
                 if extraction_config and extraction_config.enabled and self.llm_client:
@@ -1446,6 +1553,222 @@ class Spiderweb:
                         )
         
         return trace
+
+    async def achieve_goal(
+        self,
+        goal: str,
+        *,
+        persona: str | None = None,
+        instructions: str | None = None,
+        research_config: ResearchAgentConfig | None = None,
+        search_provider_config: SearchProviderConfig | None = None,
+        crawler_config: CrawlerConfig | None = None,
+        depth_config: SearchDepthConfig | None = None,
+        model: str | None = None,
+        ingest: bool = False,
+        save_to: str | Path | None = None,
+        save_format: str | None = None,
+        save_trace_to: str | Path | None = None,
+        trace_format: Literal["json", "markdown", "jsonl"] | None = None,
+    ) -> GoalResult:
+        """Plan from a goal, run search+crawl per query with agent ``SearchStrategy``, synthesize report."""
+        if not self.llm_client:
+            raise ValueError("LLM client required for achieve_goal")
+
+        from spiderweb.research.agent import (
+            aggregate_traces_for_report,
+            create_research_plan,
+            dedupe_listings,
+            format_listings_as_list,
+            gather_listings_from_traces,
+            generate_more_queries,
+            summarize_traces_in_batches,
+            synthesize_report,
+            synthesize_report_from_summaries,
+            validate_items,
+        )
+        from spiderweb.research.models import PipelineType
+        from spiderweb.search.content_filter import filter_stale_listings
+
+        rc = research_config or ResearchAgentConfig()
+        effective_model = model or rc.model
+        plan = await create_research_plan(
+            self.llm_client,
+            goal=goal,
+            persona=persona,
+            instructions=instructions,
+            model=effective_model,
+        )
+
+        sp = search_provider_config or SearchProviderConfig()
+        cc = crawler_config or CrawlerConfig(
+            wait_until="domcontentloaded",
+            scan_full_page=True,
+            scroll_delay=0.5,
+            word_count_threshold=10,
+        )
+        dc = depth_config or SearchDepthConfig()
+        sem = asyncio.Semaphore(rc.max_parallel_crawls)
+
+        async def run_query(q: str):
+            async with sem:
+                return await self.search_crawl_extract(
+                    query=q,
+                    search_provider_config=sp,
+                    crawler_config=cc,
+                    depth_config=dc,
+                    ingest=ingest,
+                    save_to=save_to,
+                    save_format=save_format,
+                    save_trace_to=save_trace_to,
+                    trace_format=trace_format,
+                    search_strategy=plan.search_strategy,
+                )
+
+        persona_effective = persona or "You are a research agent"
+        instr = instructions or goal
+        use_listing_pipeline = plan.pipeline == PipelineType.listing
+
+        # Iterative search when target_listings is set and listing pipeline is active
+        if rc.target_listings is not None and use_listing_pipeline:
+            all_listings: list = []
+            all_traces: list[SearchCrawlTrace] = []
+            queries_used: list[str] = []
+            rejected_accum: list = []
+            available_queries = list(plan.queries)
+            round_num = 0
+
+            while len(all_listings) < rc.target_listings and round_num < rc.max_search_rounds:
+                # Get queries for this round
+                if available_queries:
+                    round_queries = available_queries[:rc.queries_per_round]
+                    available_queries = available_queries[rc.queries_per_round:]
+                else:
+                    # Generate more queries when initial ones are exhausted
+                    round_queries = await generate_more_queries(
+                        self.llm_client,
+                        goal,
+                        queries_already_tried=queries_used,
+                        listings_found_so_far=len(all_listings),
+                        target_count=rc.target_listings,
+                        num_queries=rc.queries_per_round,
+                        model=effective_model,
+                    )
+                    if not round_queries:
+                        break  # LLM couldn't generate more queries
+
+                # Execute queries for this round
+                traces = await asyncio.gather(*[run_query(q) for q in round_queries])
+                round_traces = [t for t in traces if isinstance(t, SearchCrawlTrace)]
+                all_traces.extend(round_traces)
+                queries_used.extend(round_queries)
+
+                # Extract and filter listings from this round
+                new_listings = await gather_listings_from_traces(
+                    self.llm_client,
+                    round_traces,
+                    goal,
+                    store=None,
+                    max_chars_per_page=rc.max_chars_per_page_for_extraction,
+                    model=effective_model,
+                    max_parallel=rc.max_parallel_crawls,
+                )
+                new_listings = filter_stale_listings(new_listings)
+
+                if plan.acceptance_criteria:
+                    verdicts = await validate_items(
+                        self.llm_client,
+                        new_listings,
+                        plan.acceptance_criteria,
+                        goal,
+                        model=effective_model,
+                    )
+                    rejected_accum.extend(v for v in verdicts if not v.passed)
+                    passed_items = [v.item for v in verdicts if v.passed]
+                    deduped = dedupe_listings(passed_items, all_listings)
+                else:
+                    deduped = dedupe_listings(new_listings, all_listings)
+                all_listings.extend(deduped)
+                round_num += 1
+
+            report = format_listings_as_list(all_listings)
+            return GoalResult(
+                plan=plan,
+                report=report,
+                traces=all_traces,
+                queries_used=queries_used,
+                rejected_items=rejected_accum,
+            )
+
+        # One-shot execution (original behavior)
+        traces = await asyncio.gather(*[run_query(q) for q in plan.queries])
+        all_traces = [t for t in traces if isinstance(t, SearchCrawlTrace)]
+
+        rejected_items: list = []
+        if use_listing_pipeline:
+            listings = await gather_listings_from_traces(
+                self.llm_client,
+                all_traces,
+                goal,
+                store=None,
+                max_chars_per_page=rc.max_chars_per_page_for_extraction,
+                model=effective_model,
+                max_parallel=rc.max_parallel_crawls,
+            )
+            listings = filter_stale_listings(listings)
+            if plan.acceptance_criteria:
+                verdicts = await validate_items(
+                    self.llm_client,
+                    listings,
+                    plan.acceptance_criteria,
+                    goal,
+                    model=effective_model,
+                )
+                rejected_items = [v for v in verdicts if not v.passed]
+                listings = [v.item for v in verdicts if v.passed]
+            report = format_listings_as_list(listings)
+        elif rc.use_batched_summarization:
+            batch_summaries = await summarize_traces_in_batches(
+                self.llm_client,
+                persona_effective,
+                instr,
+                all_traces,
+                store=None,
+                batch_size_pages=rc.summary_batch_size_pages,
+                max_chars_per_page=rc.max_chars_per_page_for_report,
+                model=effective_model,
+            )
+            report = await synthesize_report_from_summaries(
+                self.llm_client,
+                persona_effective,
+                instr,
+                batch_summaries,
+                report_focus=plan.report_focus,
+                report_format_instructions=plan.report_format_instructions,
+                model=effective_model,
+            )
+        else:
+            aggregated = await aggregate_traces_for_report(
+                all_traces,
+                max_chars_per_page=rc.max_chars_per_page_for_report,
+            )
+            report = await synthesize_report(
+                self.llm_client,
+                persona_effective,
+                instr,
+                aggregated,
+                report_focus=plan.report_focus,
+                report_format_instructions=plan.report_format_instructions,
+                model=effective_model,
+            )
+
+        return GoalResult(
+            plan=plan,
+            report=report,
+            traces=all_traces,
+            queries_used=list(plan.queries),
+            rejected_items=rejected_items,
+        )
 
     async def crawl_and_query(
         self,
