@@ -91,7 +91,21 @@ class WebLoader:
             f"Initialized WebLoader with {type(self.crawler).__name__} "
             f"(extraction={'enabled' if self.extractor else 'disabled'})"
         )
-    
+
+    async def close(self) -> None:
+        """Release crawler resources (e.g. Playwright browser / Node driver).
+
+        Call after a batch of crawls so subprocesses shut down cleanly; avoids
+        stray ``EPIPE`` errors on stdout/stderr when the terminal pipe closes first.
+        """
+        close_fn = getattr(self.crawler, "close", None)
+        if close_fn is None:
+            return
+        if inspect.iscoroutinefunction(close_fn):
+            await close_fn()
+        else:
+            close_fn()
+
     def _crawl_result_to_document(
         self,
         result: CrawlResult,

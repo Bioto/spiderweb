@@ -991,113 +991,117 @@ class Spiderweb:
             extraction_config=extraction_config,
         )
         
-        # Initialize file storage if requested
-        storage = None
-        if save_to:
-            from spiderweb.crawlers.storage import CrawlStorage
-            storage = CrawlStorage(output_dir=save_to)
-            logger.info(f"Will save crawled content to {save_to}")
+        try:
+            # Initialize file storage if requested
+            storage = None
+            if save_to:
+                from spiderweb.crawlers.storage import CrawlStorage
+                storage = CrawlStorage(output_dir=save_to)
+                logger.info(f"Will save crawled content to {save_to}")
         
-        is_list = isinstance(url, list)
-        urls = url if is_list else [url]
+            is_list = isinstance(url, list)
+            urls = url if is_list else [url]
         
-        # Discover URLs from sitemap if enabled
-        if crawler_config and crawler_config.use_sitemap:
-            from spiderweb.crawlers.sitemap import discover_sitemap_url, parse_sitemap
-            import aiohttp
+            # Discover URLs from sitemap if enabled
+            if crawler_config and crawler_config.use_sitemap:
+                from spiderweb.crawlers.sitemap import discover_sitemap_url, parse_sitemap
+                import aiohttp
             
-            sitemap_urls = []
-            async with aiohttp.ClientSession() as session:
-                for base_url in urls:
-                    sitemap_url = discover_sitemap_url(base_url)
-                    try:
-                        discovered = await parse_sitemap(sitemap_url, session)
-                        sitemap_urls.extend(discovered)
-                        logger.info(f"Discovered {len(discovered)} URLs from sitemap: {sitemap_url}")
-                    except Exception as e:
-                        logger.warning(f"Failed to parse sitemap {sitemap_url}: {e}")
+                sitemap_urls = []
+                async with aiohttp.ClientSession() as session:
+                    for base_url in urls:
+                        sitemap_url = discover_sitemap_url(base_url)
+                        try:
+                            discovered = await parse_sitemap(sitemap_url, session)
+                            sitemap_urls.extend(discovered)
+                            logger.info(f"Discovered {len(discovered)} URLs from sitemap: {sitemap_url}")
+                        except Exception as e:
+                            logger.warning(f"Failed to parse sitemap {sitemap_url}: {e}")
             
-            if sitemap_urls:
-                # Merge discovered URLs with original URLs (deduplicate)
-                all_urls = list(set(urls + sitemap_urls))
-                logger.info(f"Merged {len(sitemap_urls)} sitemap URLs with {len(urls)} original URLs")
-                urls = all_urls
+                if sitemap_urls:
+                    # Merge discovered URLs with original URLs (deduplicate)
+                    all_urls = list(set(urls + sitemap_urls))
+                    logger.info(f"Merged {len(sitemap_urls)} sitemap URLs with {len(urls)} original URLs")
+                    urls = all_urls
         
-        logger.info(f"Crawling {len(urls)} URL(s) (ingest={ingest}, save_to={save_to})")
+            logger.info(f"Crawling {len(urls)} URL(s) (ingest={ingest}, save_to={save_to})")
         
-        if not ingest:
-            # Just crawl and return raw results
-            if is_list or (crawler_config and crawler_config.max_depth > 1):
-                # Use crawl_many for multiple URLs or link following
-                results = await web_loader.crawler.crawl_many(urls, crawler_config)
+            if not ingest:
+                # Just crawl and return raw results
+                if is_list or (crawler_config and crawler_config.max_depth > 1):
+                    # Use crawl_many for multiple URLs or link following
+                    results = await web_loader.crawler.crawl_many(urls, crawler_config)
                 
-                # Save to local storage if requested
-                if storage:
-                    for result in results:
-                        if isinstance(result, CrawlResult):
-                            storage.save_crawl_result(result, format=save_format)
-                    storage.create_index()
+                    # Save to local storage if requested
+                    if storage:
+                        for result in results:
+                            if isinstance(result, CrawlResult):
+                                storage.save_crawl_result(result, format=save_format)
+                        storage.create_index()
                 
-                return results
+                    return results
+                else:
+                    # Single URL, simple crawl
+                    result = await web_loader.crawler.crawl(urls[0], crawler_config)
+                
+                    # Save to local storage if requested
+                    if storage and isinstance(result, CrawlResult):
+                        storage.save_crawl_result(result, format=save_format)
+                
+                    return result
+        
             else:
-                # Single URL, simple crawl
-                result = await web_loader.crawler.crawl(urls[0], crawler_config)
+                # Crawl and ingest into vector store
+                if is_list or (crawler_config and crawler_config.max_depth > 1):
+                    # Load multiple documents
+                    documents = await web_loader.load_many(
+                        urls,
+                        crawler_config=crawler_config,
+                        extraction_config=extraction_config,
+                        output_schema=output_schema,
+                    )
                 
-                # Save to local storage if requested
-                if storage and isinstance(result, CrawlResult):
-                    storage.save_crawl_result(result, format=save_format)
-                
-                return result
-        
-        else:
-            # Crawl and ingest into vector store
-            if is_list or (crawler_config and crawler_config.max_depth > 1):
-                # Load multiple documents
-                documents = await web_loader.load_many(
-                    urls,
-                    crawler_config=crawler_config,
-                    extraction_config=extraction_config,
-                    output_schema=output_schema,
-                )
-                
-                # Ingest each document via single pipeline path
-                results = []
-                for doc in documents:
-                    result = await self.document_processor.process_document(
+                    # Ingest each document via single pipeline path
+                    results = []
+                    for doc in documents:
+                        result = await self.document_processor.process_document(
+                            doc, store_chunks=True
+                        )
+                        results.append(result)
+
+                    successful = sum(1 for r in results if r.success)
+                    errors_by_source = {
+                        doc.metadata.source: r.errors
+                        for doc, r in zip(documents, results, strict=True)
+                        if r.errors
+                    }
+                    return BatchIngestionResult(
+                        total_documents=len(documents),
+                        successful_documents=successful,
+                        failed_documents=len(results) - successful,
+                        total_chunks=sum(r.chunks_created for r in results),
+                        total_chunks_validated=sum(r.chunks_validated for r in results),
+                        total_chunks_rejected=sum(r.chunks_rejected for r in results),
+                        processing_time_seconds=sum(r.processing_time_seconds for r in results),
+                        average_time_per_document=sum(r.processing_time_seconds for r in results) / len(results) if results else 0.0,
+                        results=results,
+                        errors=errors_by_source,
+                    )
+            
+                else:
+                    # Single document
+                    doc = await web_loader.load(
+                        urls[0],
+                        crawler_config=crawler_config,
+                        extraction_config=extraction_config,
+                        output_schema=output_schema,
+                    )
+                    return await self.document_processor.process_document(
                         doc, store_chunks=True
                     )
-                    results.append(result)
 
-                successful = sum(1 for r in results if r.success)
-                errors_by_source = {
-                    doc.metadata.source: r.errors
-                    for doc, r in zip(documents, results, strict=True)
-                    if r.errors
-                }
-                return BatchIngestionResult(
-                    total_documents=len(documents),
-                    successful_documents=successful,
-                    failed_documents=len(results) - successful,
-                    total_chunks=sum(r.chunks_created for r in results),
-                    total_chunks_validated=sum(r.chunks_validated for r in results),
-                    total_chunks_rejected=sum(r.chunks_rejected for r in results),
-                    processing_time_seconds=sum(r.processing_time_seconds for r in results),
-                    average_time_per_document=sum(r.processing_time_seconds for r in results) / len(results) if results else 0.0,
-                    results=results,
-                    errors=errors_by_source,
-                )
-            
-            else:
-                # Single document
-                doc = await web_loader.load(
-                    urls[0],
-                    crawler_config=crawler_config,
-                    extraction_config=extraction_config,
-                    output_schema=output_schema,
-                )
-                return await self.document_processor.process_document(
-                    doc, store_chunks=True
-                )
+        finally:
+            await web_loader.close()
 
     async def search_crawl_extract(
         self,
@@ -1198,185 +1202,304 @@ class Spiderweb:
             extraction_config=extraction_config,
         )
         
-        # Initialize storage if needed (by query so each search has its own subdir)
-        storage = None
-        if save_to:
-            from spiderweb.crawlers.storage import CrawlStorage
-            query_slug = sanitize_query_for_path(query)
-            output_dir = Path(save_to) / query_slug
-            storage = CrawlStorage(output_dir=output_dir)
-            logger.info(f"Will save crawled content to {output_dir}")
+        try:
+            # Initialize storage if needed (by query so each search has its own subdir)
+            storage = None
+            if save_to:
+                from spiderweb.crawlers.storage import CrawlStorage
+                query_slug = sanitize_query_for_path(query)
+                output_dir = Path(save_to) / query_slug
+                storage = CrawlStorage(output_dir=output_dir)
+                logger.info(f"Will save crawled content to {output_dir}")
         
-        # Track total pages crawled
-        total_pages_crawled = 0
-        all_crawled_urls = set()
+            # Track total pages crawled
+            total_pages_crawled = 0
+            all_crawled_urls = set()
         
-        # Multi-round search loop
-        queries_to_try = [query]
+            # Multi-round search loop
+            queries_to_try = [query]
         
-        for round_num in range(1, depth_config.max_search_rounds + 1):
-            logger.info(f"Search round {round_num}/{depth_config.max_search_rounds}")
+            for round_num in range(1, depth_config.max_search_rounds + 1):
+                logger.info(f"Search round {round_num}/{depth_config.max_search_rounds}")
             
-            # Check if we've hit max pages limit
-            if depth_config.max_pages_total and total_pages_crawled >= depth_config.max_pages_total:
-                logger.info(f"Reached max_pages_total limit ({depth_config.max_pages_total})")
-                break
+                # Check if we've hit max pages limit
+                if depth_config.max_pages_total and total_pages_crawled >= depth_config.max_pages_total:
+                    logger.info(f"Reached max_pages_total limit ({depth_config.max_pages_total})")
+                    break
             
-            # Generate expanded queries if needed
-            if round_num > 1 and depth_config.when_to_go_deeper == "expand_queries":
-                if self.llm_client:
-                    from spiderweb.pipeline.query_expansion import QueryExpander
-                    from spiderweb.models.config import QueryExpansionConfig
+                # Generate expanded queries if needed
+                if round_num > 1 and depth_config.when_to_go_deeper == "expand_queries":
+                    if self.llm_client:
+                        from spiderweb.pipeline.query_expansion import QueryExpander
+                        from spiderweb.models.config import QueryExpansionConfig
                     
-                    expander = QueryExpander(
-                        self.llm_client,
-                        QueryExpansionConfig(
-                            strategy="multi_query",
-                            num_expansions=depth_config.num_expanded_queries,
-                            include_original=False,
-                        ),
-                    )
-                    expanded = await expander.expand(query)
-                    queries_to_try = expanded[:depth_config.num_expanded_queries]
-                    logger.info(f"Generated {len(queries_to_try)} expanded queries for round {round_num}")
-                else:
-                    # No LLM, can't expand - use original query
-                    queries_to_try = [query]
-            elif round_num == 1:
-                # First round: use original query
-                queries_to_try = [query]
-            
-            # Set current_query for this round (used in trace)
-            current_query = queries_to_try[0] if queries_to_try else query
-            
-            # Execute searches for this round
-            round_pages = []
-            round_filtered = []
-            round_search_results = []
-            
-            for search_query in queries_to_try:
-                effective_query = (
-                    augment_search_query(search_query, search_strategy)
-                    if search_strategy is not None
-                    else search_query
-                )
-                logger.info(f"  Searching: {effective_query}")
-                # Search
-                search_results = await search_provider.search(
-                    effective_query,
-                    limit=search_config.limit,
-                    **search_config.extra_config,
-                )
-                round_search_results.extend(search_results.results)
-            
-            # Dedupe URLs
-            seen_urls = set()
-            unique_results = []
-            for result in round_search_results:
-                if result.url not in seen_urls and result.url not in all_crawled_urls:
-                    seen_urls.add(result.url)
-                    unique_results.append(result)
-
-            if search_strategy is not None and search_strategy.blocked_domains:
-                allowed, domain_filtered = partition_results_by_blocked_domains(
-                    unique_results,
-                    search_strategy.blocked_domains,
-                    source_query=current_query,
-                )
-                round_filtered.extend(domain_filtered)
-                unique_results = allowed
-
-            if search_strategy is not None and search_strategy.preferred_domains:
-                unique_results = sort_results_by_preferred_domains(
-                    unique_results,
-                    search_strategy.preferred_domains,
-                )
-
-            # Apply relevance filter if configured
-            candidates_to_crawl = unique_results
-            if crawler_config.crawl_relevance_prompt:
-                good_candidates, bad_candidates = await filter_by_relevance(
-                    self.llm_client,
-                    unique_results,
-                    crawler_config.crawl_relevance_prompt,
-                    use_llm=crawler_config.crawl_relevance_use_llm,
-                )
-                candidates_to_crawl = good_candidates
-                
-                # Record filtered candidates
-                for bad in bad_candidates:
-                    if isinstance(bad, FilteredCandidate):
-                        bad.source_query = current_query
-                        round_filtered.append(bad)
+                        expander = QueryExpander(
+                            self.llm_client,
+                            QueryExpansionConfig(
+                                strategy="multi_query",
+                                num_expansions=depth_config.num_expanded_queries,
+                                include_original=False,
+                            ),
+                        )
+                        expanded = await expander.expand(query)
+                        queries_to_try = expanded[:depth_config.num_expanded_queries]
+                        logger.info(f"Generated {len(queries_to_try)} expanded queries for round {round_num}")
                     else:
-                        # Dict case
-                        round_filtered.append(
-                            FilteredCandidate(
-                                url=bad.get("url", ""),
-                                title=bad.get("title"),
-                                snippet=bad.get("snippet"),
-                                source_query=current_query,
-                                filter_reason=bad.get("filter_reason", "relevance"),
-                            )
-                        )
+                        # No LLM, can't expand - use original query
+                        queries_to_try = [query]
+                elif round_num == 1:
+                    # First round: use original query
+                    queries_to_try = [query]
             
-            # Limit to crawl_results_per_round and respect max_pages_total
-            remaining_slots = depth_config.crawl_results_per_round
-            if depth_config.max_pages_total:
-                remaining_slots = min(
-                    remaining_slots,
-                    depth_config.max_pages_total - total_pages_crawled,
-                )
+                # Set current_query for this round (used in trace)
+                current_query = queries_to_try[0] if queries_to_try else query
             
-            candidates_to_crawl = candidates_to_crawl[:remaining_slots]
+                # Execute searches for this round
+                round_pages = []
+                round_filtered = []
+                round_search_results = []
             
-            if not candidates_to_crawl:
-                logger.info("No candidates to crawl in this round")
-                # Still record the round with filtered results
-                round_data = SearchRound(
-                    query=current_query,
-                    search_results=SearchResultBatch(
-                        results=round_search_results if round_search_results else [],
-                        query=current_query,
-                        total=len(round_search_results),
-                    ),
-                    pages=[],
-                    filtered_out=round_filtered,
-                )
-                trace.add_round(round_data)
-                break
-            
-            # Extract URLs and drop candidates with empty/missing URL so crawler never sees invalid URLs
-            valid_pairs = []
-            for r in candidates_to_crawl:
-                u = (r.url if isinstance(r, SearchResult) else r.get("url")) or ""
-                u = (u or "").strip()
-                if u:
-                    valid_pairs.append((r, u))
-            candidates_to_crawl = [c for c, _ in valid_pairs]
-            urls_to_crawl = [u for _, u in valid_pairs]
-
-            if search_strategy is not None and search_strategy.validate_url_liveness and urls_to_crawl:
-                head_timeout = float(min(max(crawler_config.timeout_seconds, 3), 15))
-                live_urls, dead_pairs = await partition_urls_by_liveness(
-                    urls_to_crawl,
-                    timeout=head_timeout,
-                )
-                dead_set = {u for u, _ in dead_pairs}
-                for dead_url, reason in dead_pairs:
-                    round_filtered.append(
-                        FilteredCandidate(
-                            url=dead_url,
-                            source_query=current_query,
-                            filter_reason=f"url_not_live: {reason}",
-                        )
+                for search_query in queries_to_try:
+                    effective_query = (
+                        augment_search_query(search_query, search_strategy)
+                        if search_strategy is not None
+                        else search_query
                     )
-                valid_pairs = [(c, u) for c, u in valid_pairs if u not in dead_set]
+                    logger.info(f"  Searching: {effective_query}")
+                    # Search
+                    search_results = await search_provider.search(
+                        effective_query,
+                        limit=search_config.limit,
+                        **search_config.extra_config,
+                    )
+                    round_search_results.extend(search_results.results)
+            
+                # Dedupe URLs
+                seen_urls = set()
+                unique_results = []
+                for result in round_search_results:
+                    if result.url not in seen_urls and result.url not in all_crawled_urls:
+                        seen_urls.add(result.url)
+                        unique_results.append(result)
+
+                if search_strategy is not None and search_strategy.blocked_domains:
+                    allowed, domain_filtered = partition_results_by_blocked_domains(
+                        unique_results,
+                        search_strategy.blocked_domains,
+                        source_query=current_query,
+                    )
+                    round_filtered.extend(domain_filtered)
+                    unique_results = allowed
+
+                if search_strategy is not None and search_strategy.preferred_domains:
+                    unique_results = sort_results_by_preferred_domains(
+                        unique_results,
+                        search_strategy.preferred_domains,
+                    )
+
+                # Apply relevance filter if configured
+                candidates_to_crawl = unique_results
+                if crawler_config.crawl_relevance_prompt:
+                    good_candidates, bad_candidates = await filter_by_relevance(
+                        self.llm_client,
+                        unique_results,
+                        crawler_config.crawl_relevance_prompt,
+                        use_llm=crawler_config.crawl_relevance_use_llm,
+                    )
+                    candidates_to_crawl = good_candidates
+                
+                    # Record filtered candidates
+                    for bad in bad_candidates:
+                        if isinstance(bad, FilteredCandidate):
+                            bad.source_query = current_query
+                            round_filtered.append(bad)
+                        else:
+                            # Dict case
+                            round_filtered.append(
+                                FilteredCandidate(
+                                    url=bad.get("url", ""),
+                                    title=bad.get("title"),
+                                    snippet=bad.get("snippet"),
+                                    source_query=current_query,
+                                    filter_reason=bad.get("filter_reason", "relevance"),
+                                )
+                            )
+            
+                # Limit to crawl_results_per_round and respect max_pages_total
+                remaining_slots = depth_config.crawl_results_per_round
+                if depth_config.max_pages_total:
+                    remaining_slots = min(
+                        remaining_slots,
+                        depth_config.max_pages_total - total_pages_crawled,
+                    )
+            
+                candidates_to_crawl = candidates_to_crawl[:remaining_slots]
+            
+                if not candidates_to_crawl:
+                    logger.info("No candidates to crawl in this round")
+                    # Still record the round with filtered results
+                    round_data = SearchRound(
+                        query=current_query,
+                        search_results=SearchResultBatch(
+                            results=round_search_results if round_search_results else [],
+                            query=current_query,
+                            total=len(round_search_results),
+                        ),
+                        pages=[],
+                        filtered_out=round_filtered,
+                    )
+                    trace.add_round(round_data)
+                    break
+            
+                # Extract URLs and drop candidates with empty/missing URL so crawler never sees invalid URLs
+                valid_pairs = []
+                for r in candidates_to_crawl:
+                    u = (r.url if isinstance(r, SearchResult) else r.get("url")) or ""
+                    u = (u or "").strip()
+                    if u:
+                        valid_pairs.append((r, u))
                 candidates_to_crawl = [c for c, _ in valid_pairs]
                 urls_to_crawl = [u for _, u in valid_pairs]
 
-            if not urls_to_crawl:
-                logger.info("No valid URLs to crawl in this round (all empty or missing)")
+                if search_strategy is not None and search_strategy.validate_url_liveness and urls_to_crawl:
+                    head_timeout = float(min(max(crawler_config.timeout_seconds, 3), 15))
+                    live_urls, dead_pairs = await partition_urls_by_liveness(
+                        urls_to_crawl,
+                        timeout=head_timeout,
+                    )
+                    dead_set = {u for u, _ in dead_pairs}
+                    for dead_url, reason in dead_pairs:
+                        round_filtered.append(
+                            FilteredCandidate(
+                                url=dead_url,
+                                source_query=current_query,
+                                filter_reason=f"url_not_live: {reason}",
+                            )
+                        )
+                    valid_pairs = [(c, u) for c, u in valid_pairs if u not in dead_set]
+                    candidates_to_crawl = [c for c, _ in valid_pairs]
+                    urls_to_crawl = [u for _, u in valid_pairs]
+
+                if not urls_to_crawl:
+                    logger.info("No valid URLs to crawl in this round (all empty or missing)")
+                    round_data = SearchRound(
+                        query=current_query,
+                        search_results=SearchResultBatch(
+                            results=round_search_results,
+                            query=current_query,
+                            total=len(round_search_results),
+                        ),
+                        pages=[],
+                        filtered_out=round_filtered,
+                    )
+                    trace.add_round(round_data)
+                    break
+
+                # Crawl
+                logger.info(f"Crawling {len(urls_to_crawl)} URLs")
+                crawl_results = await web_loader.crawler.crawl_many(urls_to_crawl, crawler_config)
+            
+                # Build PageRecords
+                for i, crawl_result in enumerate(crawl_results):
+                    if not isinstance(crawl_result, CrawlResult):
+                        continue
+                
+                    candidate = candidates_to_crawl[i]
+                    url = candidate.url if isinstance(candidate, SearchResult) else candidate.get("url", "")
+                
+                    # Generate summary (truncate or use LLM if available)
+                    summary = None
+                    if crawl_result.markdown:
+                        summary = crawl_result.markdown[:500] + "..." if len(crawl_result.markdown) > 500 else crawl_result.markdown
+
+                    if search_strategy is not None:
+                        body = page_content_for_filtering(crawl_result)
+                        is_stale, stale_pat = detect_stale_content(
+                            body,
+                            url,
+                            search_strategy.stale_content_patterns,
+                        )
+                        if is_stale:
+                            round_filtered.append(
+                                FilteredCandidate(
+                                    url=url,
+                                    title=candidate.title if isinstance(candidate, SearchResult) else None,
+                                    snippet=(
+                                        (candidate.description or candidate.snippet)
+                                        if isinstance(candidate, SearchResult)
+                                        else None
+                                    ),
+                                    source_query=current_query,
+                                    source_position=(
+                                        candidate.position if isinstance(candidate, SearchResult) else None
+                                    ),
+                                    filter_reason=f"stale_content: {stale_pat}",
+                                )
+                            )
+                            all_crawled_urls.add(url)
+                            continue
+                        req_ok, req_reason = passes_required_patterns(
+                            body,
+                            search_strategy.required_content_patterns,
+                        )
+                        if not req_ok:
+                            round_filtered.append(
+                                FilteredCandidate(
+                                    url=url,
+                                    title=candidate.title if isinstance(candidate, SearchResult) else None,
+                                    snippet=(
+                                        (candidate.description or candidate.snippet)
+                                        if isinstance(candidate, SearchResult)
+                                        else None
+                                    ),
+                                    source_query=current_query,
+                                    source_position=(
+                                        candidate.position if isinstance(candidate, SearchResult) else None
+                                    ),
+                                    filter_reason=req_reason or "required_pattern_mismatch",
+                                )
+                            )
+                            all_crawled_urls.add(url)
+                            continue
+
+                    # Extract structured data if configured
+                    extracted_data = None
+                    if extraction_config and extraction_config.enabled and self.llm_client:
+                        from spiderweb.crawlers.extraction import CrawlExtractor
+                    
+                        extractor = CrawlExtractor(self.llm_client, extraction_config)
+                        try:
+                            extracted_data = await extractor.extract(
+                                crawl_result.markdown or crawl_result.content,
+                                schema=output_schema or extraction_config.output_schema,
+                                semantic_guide=extraction_config.semantic_guide,
+                                extraction_query=extraction_config.extraction_query,
+                            )
+                        except Exception as e:
+                            logger.warning(f"Extraction failed for {url}: {e}")
+                
+                    page_record = PageRecord(
+                        url=url,
+                        summary=summary,
+                        crawl_result=crawl_result,
+                        source_query=current_query,
+                        source_position=(
+                            candidate.position
+                            if isinstance(candidate, SearchResult)
+                            else None
+                        ),
+                        extracted_data=extracted_data,
+                        links_found=crawl_result.links,
+                    )
+                    round_pages.append(page_record)
+                    all_crawled_urls.add(url)
+                    total_pages_crawled += 1
+                
+                    # Save to local storage if requested
+                    if storage:
+                        storage.save_crawl_result(crawl_result, format=save_format)
+            
+                # Create SearchRound and add to trace
                 round_data = SearchRound(
                     query=current_query,
                     search_results=SearchResultBatch(
@@ -1384,175 +1507,60 @@ class Spiderweb:
                         query=current_query,
                         total=len(round_search_results),
                     ),
-                    pages=[],
+                    pages=round_pages,
                     filtered_out=round_filtered,
                 )
                 trace.add_round(round_data)
-                break
-
-            # Crawl
-            logger.info(f"Crawling {len(urls_to_crawl)} URLs")
-            crawl_results = await web_loader.crawler.crawl_many(urls_to_crawl, crawler_config)
             
-            # Build PageRecords
-            for i, crawl_result in enumerate(crawl_results):
-                if not isinstance(crawl_result, CrawlResult):
-                    continue
-                
-                candidate = candidates_to_crawl[i]
-                url = candidate.url if isinstance(candidate, SearchResult) else candidate.get("url", "")
-                
-                # Generate summary (truncate or use LLM if available)
-                summary = None
-                if crawl_result.markdown:
-                    summary = crawl_result.markdown[:500] + "..." if len(crawl_result.markdown) > 500 else crawl_result.markdown
-
-                if search_strategy is not None:
-                    body = page_content_for_filtering(crawl_result)
-                    is_stale, stale_pat = detect_stale_content(
-                        body,
-                        url,
-                        search_strategy.stale_content_patterns,
-                    )
-                    if is_stale:
-                        round_filtered.append(
-                            FilteredCandidate(
-                                url=url,
-                                title=candidate.title if isinstance(candidate, SearchResult) else None,
-                                snippet=(
-                                    (candidate.description or candidate.snippet)
-                                    if isinstance(candidate, SearchResult)
-                                    else None
-                                ),
-                                source_query=current_query,
-                                source_position=(
-                                    candidate.position if isinstance(candidate, SearchResult) else None
-                                ),
-                                filter_reason=f"stale_content: {stale_pat}",
-                            )
-                        )
-                        all_crawled_urls.add(url)
-                        continue
-                    req_ok, req_reason = passes_required_patterns(
-                        body,
-                        search_strategy.required_content_patterns,
-                    )
-                    if not req_ok:
-                        round_filtered.append(
-                            FilteredCandidate(
-                                url=url,
-                                title=candidate.title if isinstance(candidate, SearchResult) else None,
-                                snippet=(
-                                    (candidate.description or candidate.snippet)
-                                    if isinstance(candidate, SearchResult)
-                                    else None
-                                ),
-                                source_query=current_query,
-                                source_position=(
-                                    candidate.position if isinstance(candidate, SearchResult) else None
-                                ),
-                                filter_reason=req_reason or "required_pattern_mismatch",
-                            )
-                        )
-                        all_crawled_urls.add(url)
-                        continue
-
-                # Extract structured data if configured
-                extracted_data = None
-                if extraction_config and extraction_config.enabled and self.llm_client:
-                    from spiderweb.crawlers.extraction import CrawlExtractor
-                    
-                    extractor = CrawlExtractor(self.llm_client, extraction_config)
-                    try:
-                        extracted_data = await extractor.extract(
-                            crawl_result.markdown or crawl_result.content,
-                            schema=output_schema or extraction_config.output_schema,
-                            semantic_guide=extraction_config.semantic_guide,
-                            extraction_query=extraction_config.extraction_query,
-                        )
-                    except Exception as e:
-                        logger.warning(f"Extraction failed for {url}: {e}")
-                
-                page_record = PageRecord(
-                    url=url,
-                    summary=summary,
-                    crawl_result=crawl_result,
-                    source_query=current_query,
-                    source_position=(
-                        candidate.position
-                        if isinstance(candidate, SearchResult)
-                        else None
-                    ),
-                    extracted_data=extracted_data,
-                    links_found=crawl_result.links,
-                )
-                round_pages.append(page_record)
-                all_crawled_urls.add(url)
-                total_pages_crawled += 1
-                
-                # Save to local storage if requested
-                if storage:
-                    storage.save_crawl_result(crawl_result, format=save_format)
-            
-            # Create SearchRound and add to trace
-            round_data = SearchRound(
-                query=current_query,
-                search_results=SearchResultBatch(
-                    results=round_search_results,
-                    query=current_query,
-                    total=len(round_search_results),
-                ),
-                pages=round_pages,
-                filtered_out=round_filtered,
-            )
-            trace.add_round(round_data)
-            
-            # Decide if we should continue
-            if round_num >= depth_config.max_search_rounds:
-                break
-            
-            if depth_config.when_to_go_deeper == "always":
-                # Continue to next round
-                continue
-            elif depth_config.when_to_go_deeper == "if_not_found":
-                # Check if answer found (simplified: check if we got good results)
-                if len(round_pages) >= depth_config.crawl_results_per_round // 2:
-                    logger.info("Sufficient results found, stopping")
+                # Decide if we should continue
+                if round_num >= depth_config.max_search_rounds:
                     break
+            
+                if depth_config.when_to_go_deeper == "always":
+                    # Continue to next round
+                    continue
+                elif depth_config.when_to_go_deeper == "if_not_found":
+                    # Check if answer found (simplified: check if we got good results)
+                    if len(round_pages) >= depth_config.crawl_results_per_round // 2:
+                        logger.info("Sufficient results found, stopping")
+                        break
         
-        # Save trace if requested (by query so each search has its own file)
-        if save_trace_to:
-            base = Path(save_trace_to)
-            query_slug = sanitize_query_for_path(query)
-            if base.suffix.lower() in (".json", ".jsonl", ".md"):
-                trace_dir = base.parent
-            else:
-                trace_dir = base
-            trace_dir.mkdir(parents=True, exist_ok=True)
-            trace_path = trace_dir / f"{query_slug}.{trace_format}"
-            write_trace(trace, trace_path, format=trace_format)
-            logger.info(f"Saved trace to {trace_path}")
+            # Save trace if requested (by query so each search has its own file)
+            if save_trace_to:
+                base = Path(save_trace_to)
+                query_slug = sanitize_query_for_path(query)
+                if base.suffix.lower() in (".json", ".jsonl", ".md"):
+                    trace_dir = base.parent
+                else:
+                    trace_dir = base
+                trace_dir.mkdir(parents=True, exist_ok=True)
+                trace_path = trace_dir / f"{query_slug}.{trace_format}"
+                write_trace(trace, trace_path, format=trace_format)
+                logger.info(f"Saved trace to {trace_path}")
         
-        # Create index if storage was used
-        if storage:
-            storage.create_index()
+            # Create index if storage was used
+            if storage:
+                storage.create_index()
         
-        # Handle ingestion if requested
-        if ingest:
-            for round_data in trace.rounds:
-                for page in round_data.pages:
-                    if page.crawl_result and page.crawl_result.success:
-                        doc = await web_loader.load(
-                            page.url,
-                            crawler_config=crawler_config,
-                            extraction_config=extraction_config,
-                            output_schema=output_schema,
-                        )
-                        await self.document_processor.process_document(
-                            doc, store_chunks=True
-                        )
+            # Handle ingestion if requested
+            if ingest:
+                for round_data in trace.rounds:
+                    for page in round_data.pages:
+                        if page.crawl_result and page.crawl_result.success:
+                            doc = await web_loader.load(
+                                page.url,
+                                crawler_config=crawler_config,
+                                extraction_config=extraction_config,
+                                output_schema=output_schema,
+                            )
+                            await self.document_processor.process_document(
+                                doc, store_chunks=True
+                            )
         
-        return trace
+            return trace
+
+        finally:
+            await web_loader.close()
 
     async def achieve_goal(
         self,
@@ -1578,15 +1586,15 @@ class Spiderweb:
         from spiderweb.research.agent import (
             aggregate_traces_for_report,
             create_research_plan,
-            dedupe_listings,
             format_listings_as_list,
             gather_listings_from_traces,
-            generate_more_queries,
             summarize_traces_in_batches,
             synthesize_report,
+            synthesize_report_from_listings_and_summaries,
             synthesize_report_from_summaries,
             validate_items,
         )
+        from spiderweb.workflows.research import GoalResearchWorkflow
         from spiderweb.research.models import PipelineType
         from spiderweb.search.content_filter import filter_stale_listings
 
@@ -1627,77 +1635,52 @@ class Spiderweb:
 
         persona_effective = persona or "You are a research agent"
         instr = instructions or goal
-        use_listing_pipeline = plan.pipeline == PipelineType.listing
+        listing_style_pipeline = plan.pipeline in (PipelineType.listing, PipelineType.listing_report)
 
-        # Iterative search when target_listings is set and listing pipeline is active
-        if rc.target_listings is not None and use_listing_pipeline:
-            all_listings: list = []
-            all_traces: list[SearchCrawlTrace] = []
-            queries_used: list[str] = []
-            rejected_accum: list = []
-            available_queries = list(plan.queries)
-            round_num = 0
-
-            while len(all_listings) < rc.target_listings and round_num < rc.max_search_rounds:
-                # Get queries for this round
-                if available_queries:
-                    round_queries = available_queries[:rc.queries_per_round]
-                    available_queries = available_queries[rc.queries_per_round:]
-                else:
-                    # Generate more queries when initial ones are exhausted
-                    round_queries = await generate_more_queries(
-                        self.llm_client,
-                        goal,
-                        queries_already_tried=queries_used,
-                        listings_found_so_far=len(all_listings),
-                        target_count=rc.target_listings,
-                        num_queries=rc.queries_per_round,
-                        model=effective_model,
-                    )
-                    if not round_queries:
-                        break  # LLM couldn't generate more queries
-
-                # Execute queries for this round
-                traces = await asyncio.gather(*[run_query(q) for q in round_queries])
-                round_traces = [t for t in traces if isinstance(t, SearchCrawlTrace)]
-                all_traces.extend(round_traces)
-                queries_used.extend(round_queries)
-
-                # Extract and filter listings from this round
-                new_listings = await gather_listings_from_traces(
+        # Iterative search when target_listings is set and listing-style pipeline is active
+        if rc.target_listings is not None and listing_style_pipeline:
+            workflow = GoalResearchWorkflow(research_config=rc)
+            listing_result = await workflow.run_iterative_listings(
+                goal=goal,
+                plan=plan,
+                llm_client=self.llm_client,
+                run_query=run_query,
+                target_listings=rc.target_listings,
+                research_config=rc,
+                model=effective_model,
+                persona=persona_effective,
+                progress_callback=None,
+            )
+            report = listing_result.report
+            if plan.pipeline == PipelineType.listing_report:
+                batch_summaries = await summarize_traces_in_batches(
                     self.llm_client,
-                    round_traces,
-                    goal,
+                    persona_effective,
+                    instr,
+                    listing_result.traces,
                     store=None,
-                    max_chars_per_page=rc.max_chars_per_page_for_extraction,
+                    batch_size_pages=rc.summary_batch_size_pages,
+                    max_chars_per_page=rc.max_chars_per_page_for_report,
                     model=effective_model,
-                    max_parallel=rc.max_parallel_crawls,
                 )
-                new_listings = filter_stale_listings(new_listings)
-
-                if plan.acceptance_criteria:
-                    verdicts = await validate_items(
-                        self.llm_client,
-                        new_listings,
-                        plan.acceptance_criteria,
-                        goal,
-                        model=effective_model,
-                    )
-                    rejected_accum.extend(v for v in verdicts if not v.passed)
-                    passed_items = [v.item for v in verdicts if v.passed]
-                    deduped = dedupe_listings(passed_items, all_listings)
-                else:
-                    deduped = dedupe_listings(new_listings, all_listings)
-                all_listings.extend(deduped)
-                round_num += 1
-
-            report = format_listings_as_list(all_listings)
+                report = await synthesize_report_from_listings_and_summaries(
+                    self.llm_client,
+                    persona_effective,
+                    instr,
+                    listing_result.listings,
+                    batch_summaries,
+                    report_focus=plan.report_focus,
+                    report_format_instructions=plan.report_format_instructions,
+                    model=effective_model,
+                )
             return GoalResult(
                 plan=plan,
                 report=report,
-                traces=all_traces,
-                queries_used=queries_used,
-                rejected_items=rejected_accum,
+                traces=listing_result.traces,
+                queries_used=listing_result.queries_used,
+                listings=listing_result.listings,
+                rejected_items=listing_result.rejected_items,
+                reflections=listing_result.reflections,
             )
 
         # One-shot execution (original behavior)
@@ -1705,7 +1688,8 @@ class Spiderweb:
         all_traces = [t for t in traces if isinstance(t, SearchCrawlTrace)]
 
         rejected_items: list = []
-        if use_listing_pipeline:
+        listings_out: list = []
+        if listing_style_pipeline:
             listings = await gather_listings_from_traces(
                 self.llm_client,
                 all_traces,
@@ -1726,7 +1710,30 @@ class Spiderweb:
                 )
                 rejected_items = [v for v in verdicts if not v.passed]
                 listings = [v.item for v in verdicts if v.passed]
-            report = format_listings_as_list(listings)
+            listings_out = listings
+            if plan.pipeline == PipelineType.listing:
+                report = format_listings_as_list(listings)
+            else:
+                batch_summaries = await summarize_traces_in_batches(
+                    self.llm_client,
+                    persona_effective,
+                    instr,
+                    all_traces,
+                    store=None,
+                    batch_size_pages=rc.summary_batch_size_pages,
+                    max_chars_per_page=rc.max_chars_per_page_for_report,
+                    model=effective_model,
+                )
+                report = await synthesize_report_from_listings_and_summaries(
+                    self.llm_client,
+                    persona_effective,
+                    instr,
+                    listings,
+                    batch_summaries,
+                    report_focus=plan.report_focus,
+                    report_format_instructions=plan.report_format_instructions,
+                    model=effective_model,
+                )
         elif rc.use_batched_summarization:
             batch_summaries = await summarize_traces_in_batches(
                 self.llm_client,
@@ -1767,6 +1774,7 @@ class Spiderweb:
             report=report,
             traces=all_traces,
             queries_used=list(plan.queries),
+            listings=listings_out,
             rejected_items=rejected_items,
         )
 

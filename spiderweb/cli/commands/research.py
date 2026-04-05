@@ -1,6 +1,7 @@
 """Research agent CLI commands."""
 
 import asyncio
+from typing import Any
 from pathlib import Path
 
 import click
@@ -17,22 +18,22 @@ from spiderweb.models.config import (
     SearchDepthConfig,
     SearchProviderConfig,
 )
-from spiderweb.research.models import PipelineType
+from spiderweb.research.models import PipelineType, RoundReflection
 from spiderweb.research.agent import (
     aggregate_traces_for_report,
     create_research_plan,
-    dedupe_listings,
     format_listings_as_list,
     gather_listings_from_traces,
-    generate_more_queries,
     generate_research_queries,
     summarize_traces_in_batches,
     synthesize_report,
+    synthesize_report_from_listings_and_summaries,
     synthesize_report_from_summaries,
     validate_items,
 )
 from spiderweb.search.content_filter import filter_stale_listings
 from spiderweb.search.trace import SearchCrawlTrace
+from spiderweb.workflows.research import GoalResearchWorkflow
 
 console = Console()
 
@@ -333,9 +334,9 @@ async def _research(
 @click.option("--target", type=int, default=None, help="Target number of listings to find (iterative search).")
 @click.option(
     "--search-rounds",
-    type=click.IntRange(1, 20),
-    default=5,
-    help="Max iterative search rounds when using --target.",
+    type=click.IntRange(1, 150),
+    default=10,
+    help="Max iterative search rounds when using --target. Default: 10.",
 )
 @_common_options
 def goal_cmd(
@@ -508,120 +509,138 @@ async def _goal(
                 console.print(f"[yellow]⚠ Query failed (will continue): {q!r} — {e}[/yellow]")
                 return SearchCrawlTrace(original_query=q)
 
-        use_listing_pipeline = plan.pipeline == PipelineType.listing
+        listing_style_pipeline = plan.pipeline in (PipelineType.listing, PipelineType.listing_report)
+        final_listings: list = []
 
-        # Iterative search when target is set and listing pipeline is active
-        if target is not None and use_listing_pipeline:
+        # Iterative search when target is set and listing-style pipeline is active
+        if target is not None and listing_style_pipeline:
             console.print(f"[dim]Iterative search mode: targeting {target} listings[/dim]")
             if plan.acceptance_criteria is None:
                 console.print(
-                    "[dim]Note: listing pipeline without acceptance_criteria; "
+                    "[dim]Note: listing/listing_report pipeline without acceptance_criteria; "
                     "items are not LLM-validated against goal rules.[/dim]"
                 )
-            all_listings: list = []
-            all_traces: list[SearchCrawlTrace] = []
-            queries_used: list[str] = []
-            available_queries = list(plan.queries)
-            round_num = 0
 
-            while len(all_listings) < target and round_num < research_config.max_search_rounds:
-                # Get queries for this round
-                if available_queries:
-                    round_queries = available_queries[:research_config.queries_per_round]
-                    available_queries = available_queries[research_config.queries_per_round:]
-                else:
-                    console.print(f"[dim]Round {round_num + 1}: Generating more queries...[/dim]")
-                    round_queries = await generate_more_queries(
-                        llm,
-                        goal,
-                        queries_already_tried=queries_used,
-                        listings_found_so_far=len(all_listings),
-                        target_count=target,
-                        num_queries=research_config.queries_per_round,
-                        model=effective_model,
+            def research_progress(
+                step: str, current: int | None, total: int | None, detail: Any | None
+            ) -> None:
+                if step == "reflect_start":
+                    console.print(f"[dim]Round {current}: Reflecting to plan next queries...[/dim]")
+                elif step == "reflection" and isinstance(detail, RoundReflection):
+                    ref = detail
+                    lines = [f"• {q}" for q in ref.queries[:12]]
+                    if len(ref.queries) > 12:
+                        lines.append(f"… (+{len(ref.queries) - 12} more)")
+                    q_block = "\n".join(lines) if lines else "(none)"
+                    body = (
+                        f"[bold]Found[/bold]: {ref.what_we_found}\n\n"
+                        f"[bold]Missing[/bold]: {ref.what_is_missing}\n\n"
+                        f"[bold]Strategy[/bold]: {ref.search_adjustment}\n\n"
+                        f"[dim]{ref.reasoning}[/dim]\n\n"
+                        f"[bold]New queries[/bold]:\n{q_block}"
                     )
-                    if not round_queries:
-                        console.print("[yellow]No more queries could be generated.[/yellow]")
-                        break
-
-                console.print(f"[bold cyan]Round {round_num + 1}:[/bold cyan] Running {len(round_queries)} queries...")
-
-                # Execute queries for this round
-                with console.status(f"[bold cyan]Round {round_num + 1}: Executing {len(round_queries)} queries..."):
-                    traces = await asyncio.gather(*[run_one(q) for q in round_queries])
-                round_traces = [t for t in traces if isinstance(t, SearchCrawlTrace)]
-                all_traces.extend(round_traces)
-                queries_used.extend(round_queries)
-
-                # Extract and filter listings from this round
-                with console.status(f"[bold cyan]Round {round_num + 1}: Extracting listings..."):
-                    extracted_listings = await gather_listings_from_traces(
-                        llm,
-                        round_traces,
-                        goal,
-                        store=None,
-                        max_chars_per_page=research_config.max_chars_per_page_for_extraction,
-                        model=effective_model,
-                        max_parallel=effective_parallel,
-                    )
-                n_pages = _unique_crawled_page_count(round_traces)
-                console.print(
-                    f"[dim]  Extracted {len(extracted_listings)} listing(s) from "
-                    f"{n_pages} unique page(s) this round[/dim]"
-                )
-                filtered_listings = filter_stale_listings(extracted_listings)
-                stale_n = len(extracted_listings) - len(filtered_listings)
-                if stale_n:
                     console.print(
-                        f"[dim]  Filtered {stale_n} stale listing(s); "
-                        f"{len(filtered_listings)} kept[/dim]"
+                        Panel(
+                            body,
+                            title=f"[cyan]Round {current} reflection[/cyan]",
+                            border_style="cyan",
+                        )
+                    )
+                elif step == "round_queries":
+                    nq = total if total is not None else 0
+                    console.print(f"[bold cyan]Round {current}:[/bold cyan] Running {nq} queries...")
+                elif step == "round_done" and isinstance(detail, dict):
+                    extracted_count = int(detail.get("extracted_count", 0))
+                    pages_crawled = int(detail.get("pages_crawled", 0))
+                    stale_dropped = int(detail.get("stale_dropped", 0))
+                    after_stale = int(detail.get("after_stale_count", 0))
+                    deduped_new = int(detail.get("deduped_new", 0))
+                    total_listings = int(detail.get("total_listings", 0))
+                    dup_skipped = int(detail.get("dup_skipped", 0))
+                    r = int(current or 0)
+                    console.print(
+                        f"[dim]  Extracted {extracted_count} listing(s) from "
+                        f"{pages_crawled} unique page(s) this round[/dim]"
+                    )
+                    if stale_dropped:
+                        console.print(
+                            f"[dim]  Filtered {stale_dropped} stale listing(s); "
+                            f"{after_stale} kept[/dim]"
+                        )
+                    verdicts = detail.get("verdicts")
+                    if verdicts:
+                        for v in verdicts:
+                            if not v.passed:
+                                console.print(
+                                    f"[dim]  FAIL: {v.item.url} — {'; '.join(v.rule_results)}[/dim]"
+                                )
+                            elif v.unknown_count:
+                                console.print(
+                                    f"[dim]  PASS (partial): {v.item.url} — "
+                                    f"{v.unknown_count} rule(s) unverifiable[/dim]"
+                                )
+                        fail_n = sum(1 for x in verdicts if not x.passed)
+                        if fail_n:
+                            console.print(f"[dim]  Rejected {fail_n} item(s) by acceptance criteria[/dim]")
+                    if dup_skipped:
+                        console.print(f"[dim]  Skipped {dup_skipped} duplicate(s) already in prior rounds[/dim]")
+                    console.print(
+                        f"[green]✓[/green] Round {r}: Found {deduped_new} new listings ({total_listings} total)"
                     )
 
-                if plan.acceptance_criteria:
-                    with console.status(f"[bold cyan]Round {round_num + 1}: Validating items against criteria..."):
-                        verdicts = await validate_items(
-                            llm,
-                            filtered_listings,
-                            plan.acceptance_criteria,
-                            goal,
-                            model=effective_model,
-                        )
-                    for v in verdicts:
-                        if not v.passed:
-                            console.print(
-                                f"[dim]  FAIL: {v.item.url} — {'; '.join(v.rule_results)}[/dim]"
-                            )
-                        elif v.unknown_count:
-                            console.print(
-                                f"[dim]  PASS (partial): {v.item.url} — "
-                                f"{v.unknown_count} rule(s) unverifiable[/dim]"
-                            )
-                    fail_n = sum(1 for v in verdicts if not v.passed)
-                    if fail_n:
-                        console.print(f"[dim]  Rejected {fail_n} item(s) by acceptance criteria[/dim]")
-                    passed_items = [v.item for v in verdicts if v.passed]
-                    to_dedupe = passed_items
-                else:
-                    to_dedupe = filtered_listings
+            wf = GoalResearchWorkflow(research_config=research_config)
+            listing_result = await wf.run_iterative_listings(
+                goal=goal,
+                plan=plan,
+                llm_client=llm,
+                run_query=run_one,
+                target_listings=target,
+                research_config=research_config,
+                model=effective_model,
+                persona=persona or "You are a research agent",
+                progress_callback=research_progress,
+            )
+            all_listings = listing_result.listings
+            all_traces = listing_result.traces
+            report = listing_result.report
+            final_listings = all_listings
 
-                # Dedupe against already found listings
-                deduped = dedupe_listings(to_dedupe, all_listings)
-                dup_n = len(to_dedupe) - len(deduped)
-                if dup_n:
-                    console.print(f"[dim]  Skipped {dup_n} duplicate(s) already in prior rounds[/dim]")
-                all_listings.extend(deduped)
-                round_num += 1
-                console.print(f"[green]✓[/green] Round {round_num}: Found {len(deduped)} new listings ({len(all_listings)} total)")
+            if len(all_listings) >= target:
+                console.print(f"[green]✓[/green] Target of {target} listings reached!")
 
-                if len(all_listings) >= target:
-                    console.print(f"[green]✓[/green] Target of {target} listings reached!")
-                    break
-
-            if not all_listings:
+            if not all_listings and plan.pipeline != PipelineType.listing_report:
                 console.print("[red]No listings found. Cannot generate report.[/red]")
                 return
-
-            report = format_listings_as_list(all_listings)
+            if plan.pipeline == PipelineType.listing_report and not all_traces:
+                console.print("[red]No successful crawls. Cannot generate report.[/red]")
+                return
+            if plan.pipeline == PipelineType.listing_report:
+                if not all_listings:
+                    console.print(
+                        "[yellow]No items extracted; synthesizing report from crawl summaries only.[/yellow]"
+                    )
+                with console.status("[bold cyan]Summarizing crawls for report..."):
+                    batch_summaries = await summarize_traces_in_batches(
+                        llm,
+                        persona=persona or "You are a research agent",
+                        instructions=instructions or goal,
+                        traces=all_traces,
+                        store=None,
+                        batch_size_pages=research_config.summary_batch_size_pages,
+                        max_chars_per_page=research_config.max_chars_per_page_for_report,
+                        model=effective_model,
+                    )
+                with console.status("[bold cyan]Generating report from items and summaries..."):
+                    report = await synthesize_report_from_listings_and_summaries(
+                        llm,
+                        persona or "You are a research agent",
+                        instructions or goal,
+                        all_listings,
+                        batch_summaries,
+                        report_focus=plan.report_focus,
+                        report_format_instructions=plan.report_format_instructions,
+                        model=effective_model,
+                    )
         else:
             # One-shot execution (original behavior)
             if live_ui:
@@ -654,10 +673,10 @@ async def _goal(
                 console.print("[red]No successful crawls. Cannot generate report.[/red]")
                 return
 
-            if use_listing_pipeline:
+            if listing_style_pipeline:
                 if plan.acceptance_criteria is None:
                     console.print(
-                        "[dim]Note: listing pipeline without acceptance_criteria; "
+                        "[dim]Note: listing/listing_report pipeline without acceptance_criteria; "
                         "items are not LLM-validated against goal rules.[/dim]"
                     )
                 with console.status("[bold cyan]Extracting listings from pages..."):
@@ -704,7 +723,36 @@ async def _goal(
                     if fail_n:
                         console.print(f"[dim]Rejected {fail_n} item(s) by acceptance criteria[/dim]")
                     listings = [v.item for v in verdicts if v.passed]
-                report = format_listings_as_list(listings)
+                final_listings = listings
+                if plan.pipeline == PipelineType.listing:
+                    report = format_listings_as_list(listings)
+                else:
+                    if not listings:
+                        console.print(
+                            "[yellow]No items extracted; synthesizing report from crawl summaries only.[/yellow]"
+                        )
+                    with console.status("[bold cyan]Summarizing crawls for report..."):
+                        batch_summaries = await summarize_traces_in_batches(
+                            llm,
+                            persona=persona or "You are a research agent",
+                            instructions=instructions or goal,
+                            traces=all_traces,
+                            store=None,
+                            batch_size_pages=research_config.summary_batch_size_pages,
+                            max_chars_per_page=research_config.max_chars_per_page_for_report,
+                            model=effective_model,
+                        )
+                    with console.status("[bold cyan]Generating report from items and summaries..."):
+                        report = await synthesize_report_from_listings_and_summaries(
+                            llm,
+                            persona or "You are a research agent",
+                            instructions or goal,
+                            listings,
+                            batch_summaries,
+                            report_focus=plan.report_focus,
+                            report_format_instructions=plan.report_format_instructions,
+                            model=effective_model,
+                        )
             elif research_config.use_batched_summarization:
                 with console.status("[bold cyan]Summarizing in batches..."):
                     batch_summaries = await summarize_traces_in_batches(
@@ -748,6 +796,11 @@ async def _goal(
         if output:
             Path(output).write_text(report_text, encoding="utf-8")
             console.print(f"[green]✓[/green] Report saved to [bold]{output}[/bold]")
+            if plan.pipeline == PipelineType.listing_report and final_listings:
+                out_path = Path(output)
+                listings_path = out_path.with_name(f"{out_path.stem}-listings{out_path.suffix}")
+                listings_path.write_text(format_listings_as_list(final_listings), encoding="utf-8")
+                console.print(f"[green]✓[/green] Extracted items saved to [bold]{listings_path}[/bold]")
         if show_full or not output:
             if show_full:
                 console.print(report_text)

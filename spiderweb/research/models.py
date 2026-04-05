@@ -114,6 +114,7 @@ class PipelineType(str, Enum):
 
     listing = "listing"
     narrative = "narrative"
+    listing_report = "listing_report"
 
 
 class AcceptanceCriteria(BaseModel):
@@ -199,13 +200,14 @@ class ResearchPlan(BaseModel):
         default=PipelineType.narrative,
         description=(
             "listing: extract discrete items per page and format as a list; "
-            "narrative: batch summarization / synthesis without per-item extraction."
+            "narrative: batch summarization / synthesis without per-item extraction; "
+            "listing_report: same extraction as listing, then synthesize an analytical report from items plus crawl data."
         ),
     )
     acceptance_criteria: AcceptanceCriteria | None = Field(
         default=None,
         description=(
-            "When pipeline is listing, rules each extracted item must satisfy (domain-agnostic). "
+            "When pipeline is listing or listing_report, rules each extracted item must satisfy (domain-agnostic). "
             "Omit or leave null for narrative pipeline."
         ),
     )
@@ -250,6 +252,34 @@ class ExpansionDecision(BaseModel):
     )
 
 
+class RoundReflection(BaseModel):
+    """LLM output after a listing round: gap analysis and next search queries.
+
+    Used when the initial plan queries are exhausted but the listing target
+    is not yet met.
+    """
+
+    what_we_found: str = Field(
+        description="Brief summary of patterns in accepted listings so far (topics, regions, sources).",
+    )
+    what_is_missing: str = Field(
+        description="What the goal still needs versus what we have (coverage gaps, underrepresented angles).",
+    )
+    search_adjustment: str = Field(
+        description="How to change search strategy next (phrasing, sites, facets, exclusions).",
+    )
+    reasoning: str = Field(
+        description="Short chain-of-thought tying findings, gaps, and query choices together.",
+    )
+    need_more_queries: bool = Field(
+        description="True if more web searches are worth running toward the goal.",
+    )
+    queries: list[str] = Field(
+        default_factory=list,
+        description="New search query strings for the next round (non-overlapping with tried queries).",
+    )
+
+
 @dataclass
 class ResearchReportResult:
     """Result from research_and_report execution.
@@ -276,4 +306,6 @@ class GoalResult:
     report: str | Any  # str for markdown, or BaseModel instance for structured
     traces: list[SearchCrawlTrace] = field(default_factory=list)
     queries_used: list[str] = field(default_factory=list)
+    listings: list[ListingItem] = field(default_factory=list)
     rejected_items: list["ItemVerdict"] = field(default_factory=list)
+    reflections: list[RoundReflection] = field(default_factory=list)
