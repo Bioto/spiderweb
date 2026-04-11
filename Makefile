@@ -11,7 +11,7 @@ help:
 	@echo "  make down         - Stop all services"
 	@echo ""
 	@echo "Development:"
-	@echo "  make dev          - Start in development mode (with code mounting)"
+	@echo "  make dev          - Rebuild images and start in development mode (with code mounting)"
 	@echo "  make shell        - Open shell in container"
 	@echo "  make logs         - View logs"
 	@echo "  make restart      - Restart services"
@@ -49,9 +49,9 @@ up: init
 	@echo "Run commands with:"
 	@echo "  make crawl URL=https://example.com"
 
-# Start in development mode
+# Start in development mode (rebuild images so Dockerfile / dependency changes apply)
 dev:
-	docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+	docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
 	@echo ""
 	@echo "✓ Development mode started with live code mounting"
 

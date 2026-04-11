@@ -33,7 +33,7 @@ console = Console()
     "--recency",
     type=click.Choice(["d", "w", "m", "y"]),
     default=None,
-    help="Filter results by recency: d (day), w (week), m (month), y (year). Maps to 'timelimit' for duckduckgo, 'tbs' for firecrawl. Default: none.",
+    help="Filter results by recency: d (day), w (week), m (month), y (year). Maps to timelimit (duckduckgo), tbs (firecrawl), time_range (searxng). Default: none.",
 )
 @click.option(
     "--location",
@@ -188,25 +188,25 @@ def search_cmd(
     crazy: bool,
 ):
     """Search the web, crawl results, and optionally extract structured data.
-    
+
     Performs a multi-round search → crawl → extract pipeline with configurable
     depth, relevance filtering, and query expansion. Builds a complete trace
     of the search session.
-    
+
     Examples:
-    
+
       \b
       # Basic search and crawl
       spiderweb search "python web scraping"
-      
+
       \b
       # Search with multiple rounds and query expansion
       spiderweb search "machine learning" --max-rounds 2 --when-deeper expand_queries
-      
+
       \b
       # Search with relevance filtering
       spiderweb search "product reviews" --crawl-relevance-prompt "Good: reviews, ratings. Bad: login, ads."
-      
+
       \b
       # Search, crawl, and save trace
       spiderweb search "python tutorials" --save-trace ./trace.json --trace-format jsonl
@@ -277,10 +277,13 @@ async def _search(
         when_deeper = "always"
 
     # Build search provider extra_config (recency + location)
-    _RECENCY_TO_TBS = {"d": "qdr:d", "w": "qdr:w", "m": "qdr:m", "y": "qdr:y"}
+    recency_to_tbs = {"d": "qdr:d", "w": "qdr:w", "m": "qdr:m", "y": "qdr:y"}
+    recency_to_searx_time_range = {"d": "day", "w": "week", "m": "month", "y": "year"}
     if recency:
         if search_provider == "firecrawl":
-            search_extra: dict = {"tbs": _RECENCY_TO_TBS[recency]}
+            search_extra: dict = {"tbs": recency_to_tbs[recency]}
+        elif search_provider == "searxng":
+            search_extra = {"time_range": recency_to_searx_time_range[recency]}
         else:
             search_extra = {"timelimit": recency}
     else:

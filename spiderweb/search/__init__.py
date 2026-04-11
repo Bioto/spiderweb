@@ -1,13 +1,14 @@
 """Web search components for finding and discovering URLs.
 
 This module provides a pluggable architecture for web search with support
-for multiple backends (Firecrawl, Serper, Tavily, etc.) and integration
+for multiple backends (Firecrawl, SearXNG, Tavily, etc.) and integration
 with the crawling pipeline.
 """
 
 from spiderweb.registry import search_provider_registry
 from spiderweb.search.base import SearchProvider, SearchResult, SearchResultBatch
 from spiderweb.search.duckduckgo import DuckDuckGoSearchProvider
+from spiderweb.search.searxng import SearxNGSearchProvider
 from spiderweb.search.stub import StubSearchProvider
 
 __all__ = [
@@ -16,11 +17,13 @@ __all__ = [
     "SearchResultBatch",
     "search_provider_registry",
     "DuckDuckGoSearchProvider",
+    "SearxNGSearchProvider",
     "StubSearchProvider",
 ]
 
 # Register DuckDuckGo as default (free, no API key)
 search_provider_registry.register("duckduckgo", DuckDuckGoSearchProvider)
+search_provider_registry.register("searxng", SearxNGSearchProvider)
 # Register stub for testing/development
 search_provider_registry.register("stub", StubSearchProvider)
 

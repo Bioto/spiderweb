@@ -1170,7 +1170,9 @@ class SearchProviderConfig(BaseModel):
             "For duckduckgo (ddgs): region, safesearch, timeout, timelimit (d/w/m/y), backend (e.g. duckduckgo, bing, brave), page. "
             "For firecrawl: firecrawl_api_key, firecrawl_api_url (self-hosted), sources (e.g. [\"web\"] or [\"web\",\"news\"]), "
             "location, tbs (Google-style date filter), timeout (request timeout in ms, max 300000), categories, "
-            "ignore_invalid_urls, integration, scrape_options."
+            "ignore_invalid_urls, integration, scrape_options. "
+            "For searxng: searxng_url or base_url (instance root), api_key (optional Bearer), timeout (seconds), "
+            "categories, engines, language, time_range (day|week|month|year; instance-dependent), safesearch, pageno, theme."
         ),
     )
     

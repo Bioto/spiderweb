@@ -258,6 +258,17 @@ class SpiderwebSettings(BaseSettings):
         default=None,
         description="Firecrawl API key for crawler provider 'firecrawl'. Set SPIDERWEB_FIRECRAWL_API_KEY (or FIRECRAWL_API_KEY).",
     )
+    searxng_url: str | None = Field(
+        default=None,
+        description=(
+            "Base URL of a SearXNG instance for search provider 'searxng' "
+            "(e.g. https://search.example.com). Set SPIDERWEB_SEARXNG_URL or SEARXNG_URL."
+        ),
+    )
+    searxng_api_key: str | None = Field(
+        default=None,
+        description="Optional Bearer token for a private SearXNG instance. Set SPIDERWEB_SEARXNG_API_KEY or SEARXNG_API_KEY.",
+    )
 
     # Search depth settings
     default_max_search_rounds: int = Field(

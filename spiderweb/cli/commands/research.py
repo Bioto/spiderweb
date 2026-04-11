@@ -56,7 +56,7 @@ def _common_options(f):
         "--recency",
         type=click.Choice(["d", "w", "m", "y"]),
         default=None,
-        help="Filter results by recency: d (day), w (week), m (month), y (year). Maps to 'timelimit' for duckduckgo, 'tbs' for firecrawl.",
+        help="Filter results by recency: d (day), w (week), m (month), y (year). Maps to timelimit (duckduckgo), tbs (firecrawl), time_range (searxng).",
     )(f)
     f = click.option(
         "--location",
@@ -182,10 +182,13 @@ async def _research(
     )
     effective_model = research_config.model or settings.model
 
-    _RECENCY_TO_TBS = {"d": "qdr:d", "w": "qdr:w", "m": "qdr:m", "y": "qdr:y"}
+    recency_to_tbs = {"d": "qdr:d", "w": "qdr:w", "m": "qdr:m", "y": "qdr:y"}
+    recency_to_searx_time_range = {"d": "day", "w": "week", "m": "month", "y": "year"}
     if recency:
         if search_provider == "firecrawl":
-            search_extra: dict = {"tbs": _RECENCY_TO_TBS[recency]}
+            search_extra: dict = {"tbs": recency_to_tbs[recency]}
+        elif search_provider == "searxng":
+            search_extra = {"time_range": recency_to_searx_time_range[recency]}
         else:
             search_extra = {"timelimit": recency}
     else:
@@ -459,10 +462,13 @@ async def _goal(
     )
     effective_model = research_config.model or settings.model
 
-    _RECENCY_TO_TBS = {"d": "qdr:d", "w": "qdr:w", "m": "qdr:m", "y": "qdr:y"}
+    recency_to_tbs = {"d": "qdr:d", "w": "qdr:w", "m": "qdr:m", "y": "qdr:y"}
+    recency_to_searx_time_range = {"d": "day", "w": "week", "m": "month", "y": "year"}
     if recency:
         if search_provider == "firecrawl":
-            search_extra: dict = {"tbs": _RECENCY_TO_TBS[recency]}
+            search_extra: dict = {"tbs": recency_to_tbs[recency]}
+        elif search_provider == "searxng":
+            search_extra = {"time_range": recency_to_searx_time_range[recency]}
         else:
             search_extra = {"timelimit": recency}
     else:
