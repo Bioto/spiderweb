@@ -5,8 +5,8 @@ for multiple backends (Firecrawl, Serper, Tavily, etc.) and integration
 with the crawling pipeline.
 """
 
-from spiderweb.search.base import SearchProvider, SearchResult, SearchResultBatch
 from spiderweb.registry import search_provider_registry
+from spiderweb.search.base import SearchProvider, SearchResult, SearchResultBatch
 from spiderweb.search.duckduckgo import DuckDuckGoSearchProvider
 from spiderweb.search.stub import StubSearchProvider
 
@@ -32,4 +32,13 @@ try:
     __all__.append("TavilySearchProvider")
 except ImportError:
     # Tavily not available (tavily-python not installed)
+    pass
+
+# Register Firecrawl search (requires firecrawl-py + API key at runtime)
+try:
+    from spiderweb.search.firecrawl import FirecrawlSearchProvider
+
+    search_provider_registry.register("firecrawl", FirecrawlSearchProvider)
+    __all__.append("FirecrawlSearchProvider")
+except ImportError:
     pass

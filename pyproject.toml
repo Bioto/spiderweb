@@ -105,6 +105,11 @@ neo4j = [
     "neo4j>=5.0.0",
 ]
 
+# Firecrawl hosted scrape API (requires API key)
+firecrawl = [
+    "firecrawl-py>=4.0.0",
+]
+
 # Accurate token counting for embedding batch sizing
 tokenizer = [
     "tiktoken>=0.5.0",
@@ -122,7 +127,7 @@ dev = [
 
 # All optional features
 all = [
-    "spiderweb[pdf,office,ocr,mcp,api,langextract,neo4j,tokenizer]",
+    "spiderweb[pdf,office,ocr,mcp,api,langextract,neo4j,firecrawl,tokenizer]",
 ]
 
 [project.urls]

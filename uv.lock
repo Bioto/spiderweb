@@ -1221,6 +1221,24 @@ wheels = [
 ]
 
 [[package]]
+name = "firecrawl-py"
+version = "4.22.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "aiohttp" },
+    { name = "httpx" },
+    { name = "nest-asyncio" },
+    { name = "pydantic" },
+    { name = "python-dotenv" },
+    { name = "requests" },
+    { name = "websockets" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/64/87/08cd440a3b942be5983c1a2db921d55697bdb91f7ead9a925b75715039a0/firecrawl_py-4.22.1.tar.gz", hash = "sha256:fb44d4c63ba91c076ae2f0b688f1556327c971baea45e7fb67d6ed5d393542a2", size = 174394, upload-time = "2026-04-07T01:54:19.682Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/fb/a7/54199470a5bf8e09bdf9511f80e766a11b20daafc3b0e1e638ec04e24fc9/firecrawl_py-4.22.1-py3-none-any.whl", hash = "sha256:3df92a7888f9d5907a6fbbe50ade330d2925f5bf51f8efa507c2ab9891df9a0a", size = 217741, upload-time = "2026-04-07T01:54:18.403Z" },
+]
+
+[[package]]
 name = "flask"
 version = "3.1.2"
 source = { registry = "https://pypi.org/simple" }
@@ -2895,6 +2913,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/1b/01/d6ce65e4647f6cb2b9cca3b813978f7329b54b4e36660aaec1ddf0ccce7a/neo4j-6.1.0.tar.gz", hash = "sha256:b5dde8c0d8481e7b6ae3733569d990dd3e5befdc5d452f531ad1884ed3500b84", size = 239629, upload-time = "2026-01-12T11:27:34.777Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/70/5c/ee71e2dd955045425ef44283f40ba1da67673cf06404916ca2950ac0cd39/neo4j-6.1.0-py3-none-any.whl", hash = "sha256:3bd93941f3a3559af197031157220af9fd71f4f93a311db687bd69ffa417b67d", size = 325326, upload-time = "2026-01-12T11:27:33.196Z" },
+]
+
+[[package]]
+name = "nest-asyncio"
+version = "1.6.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/83/f8/51569ac65d696c8ecbee95938f89d4abf00f47d58d48f6fbabfe8f0baefe/nest_asyncio-1.6.0.tar.gz", hash = "sha256:6f172d5449aca15afd6c646851f4e31e02c598d553a667e38cafa997cfec55fe", size = 7418, upload-time = "2024-01-21T14:25:19.227Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/a0/c4/c2971a3ba4c6103a3d10c4b0f24f461ddc027f0f09763220cf35ca1401b3/nest_asyncio-1.6.0-py3-none-any.whl", hash = "sha256:87af6efd6b5e897c81050477ef65c62e2b2f35d51703cae01aff2905b1852e1c", size = 5195, upload-time = "2024-01-21T14:25:17.223Z" },
 ]
 
 [[package]]
@@ -4768,6 +4795,7 @@ dependencies = [
 [package.optional-dependencies]
 all = [
     { name = "fastapi" },
+    { name = "firecrawl-py" },
     { name = "langextract" },
     { name = "mcp" },
     { name = "neo4j" },
@@ -4792,6 +4820,9 @@ dev = [
     { name = "pytest-asyncio" },
     { name = "pytest-cov" },
     { name = "ruff" },
+]
+firecrawl = [
+    { name = "firecrawl-py" },
 ]
 langextract = [
     { name = "langextract" },
@@ -4828,6 +4859,7 @@ requires-dist = [
     { name = "crawl4ai", specifier = ">=0.4.0" },
     { name = "ddgs", specifier = ">=9.0.0" },
     { name = "fastapi", marker = "extra == 'api'", specifier = ">=0.115.0" },
+    { name = "firecrawl-py", marker = "extra == 'firecrawl'", specifier = ">=4.0.0" },
     { name = "gluellm", specifier = ">=1.2.5" },
     { name = "langextract", marker = "extra == 'langextract'", specifier = ">=1.0.0" },
     { name = "markitdown", extras = ["all"], specifier = ">=0.0.1a2" },
@@ -4855,12 +4887,12 @@ requires-dist = [
     { name = "rich", specifier = ">=14.2.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.14.10" },
     { name = "spacy", specifier = ">=3.8.0" },
-    { name = "spiderweb", extras = ["pdf", "office", "ocr", "mcp", "api", "langextract", "neo4j", "tokenizer"], marker = "extra == 'all'" },
+    { name = "spiderweb", extras = ["pdf", "office", "ocr", "mcp", "api", "langextract", "neo4j", "firecrawl", "tokenizer"], marker = "extra == 'all'" },
     { name = "tenacity", specifier = ">=9.0.0" },
     { name = "tiktoken", marker = "extra == 'tokenizer'", specifier = ">=0.5.0" },
     { name = "uvicorn", extras = ["standard"], marker = "extra == 'api'", specifier = ">=0.32.0" },
 ]
-provides-extras = ["pdf", "office", "ocr", "mcp", "api", "langextract", "neo4j", "tokenizer", "dev", "all"]
+provides-extras = ["pdf", "office", "ocr", "mcp", "api", "langextract", "neo4j", "firecrawl", "tokenizer", "dev", "all"]
 
 [[package]]
 name = "sqlalchemy"

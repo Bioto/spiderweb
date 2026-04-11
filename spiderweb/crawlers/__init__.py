@@ -11,6 +11,7 @@ Custom crawlers can be registered for use via configuration strings.
 from spiderweb.crawlers.base import Crawler, CrawlResult
 from spiderweb.crawlers.crawl4ai import Crawl4AICrawler
 from spiderweb.crawlers.extraction import CrawlExtractor
+from spiderweb.crawlers.firecrawl import FirecrawlCrawler
 from spiderweb.crawlers.http import HttpCrawler
 from spiderweb.crawlers.opensky import OpenSkyCrawler
 from spiderweb.crawlers.x import XCrawler, XUserScrapeResult
@@ -21,6 +22,7 @@ __all__ = [
     "CrawlResult",
     "HttpCrawler",
     "Crawl4AICrawler",
+    "FirecrawlCrawler",
     "CrawlExtractor",
     "OpenSkyCrawler",
     "XCrawler",
@@ -31,6 +33,7 @@ __all__ = [
 # These names correspond to CrawlerConfig.provider values
 crawler_registry.register("http", HttpCrawler)
 crawler_registry.register("crawl4ai", Crawl4AICrawler)
+crawler_registry.register("firecrawl", FirecrawlCrawler)
 crawler_registry.register("opensky", OpenSkyCrawler)
 crawler_registry.register("x", XCrawler)
 

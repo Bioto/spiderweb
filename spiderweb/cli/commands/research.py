@@ -1,14 +1,13 @@
 """Research agent CLI commands."""
 
 import asyncio
-from typing import Any
 from pathlib import Path
+from typing import Any
 
 import click
 from gluellm import GlueLLM
 from rich.console import Console
 from rich.panel import Panel
-from rich.table import Table
 
 from spiderweb.api import Spiderweb
 from spiderweb.config import settings
@@ -18,7 +17,6 @@ from spiderweb.models.config import (
     SearchDepthConfig,
     SearchProviderConfig,
 )
-from spiderweb.research.models import PipelineType, RoundReflection
 from spiderweb.research.agent import (
     aggregate_traces_for_report,
     create_research_plan,
@@ -31,6 +29,7 @@ from spiderweb.research.agent import (
     synthesize_report_from_summaries,
     validate_items,
 )
+from spiderweb.research.models import PipelineType, RoundReflection
 from spiderweb.search.content_filter import filter_stale_listings
 from spiderweb.search.trace import SearchCrawlTrace
 from spiderweb.workflows.research import GoalResearchWorkflow
@@ -57,10 +56,21 @@ def _common_options(f):
         "--recency",
         type=click.Choice(["d", "w", "m", "y"]),
         default=None,
-        help="Filter by recency (duckduckgo timelimit): d (day), w (week), m (month), y (year).",
+        help="Filter results by recency: d (day), w (week), m (month), y (year). Maps to 'timelimit' for duckduckgo, 'tbs' for firecrawl.",
+    )(f)
+    f = click.option(
+        "--location",
+        type=str,
+        default=None,
+        help="Geo-target search results (firecrawl only). E.g. 'San Francisco,California,United States'. Default: none.",
     )(f)
     f = click.option("--limit", type=int, default=10, help="Max search results per round. Default: 10.")(f)
-    f = click.option("--crawl-provider", type=click.Choice(["http", "crawl4ai", "x"]), default="crawl4ai", help="Crawler. Default: crawl4ai.")(f)
+    f = click.option(
+        "--crawl-provider",
+        type=click.Choice(["http", "crawl4ai", "firecrawl", "x"]),
+        default="crawl4ai",
+        help="Crawler. Default: crawl4ai.",
+    )(f)
     f = click.option("--max-rounds", type=int, default=1, help="Max search rounds per query. Default: 1.")(f)
     f = click.option("--crawl-per-round", type=int, default=3, help="Crawl this many results per round. Default: 3.")(f)
     f = click.option("--no-js", is_flag=True, default=False, help="Disable JavaScript rendering.")(f)
@@ -90,6 +100,7 @@ def research_cmd(
     max_parallel: int,
     search_provider: str,
     recency: str | None,
+    location: str | None,
     limit: int,
     crawl_provider: str,
     max_rounds: int,
@@ -116,6 +127,7 @@ def research_cmd(
             max_parallel=max_parallel,
             search_provider=search_provider,
             recency=recency,
+            location=location,
             limit=limit,
             crawl_provider=crawl_provider,
             max_rounds=max_rounds,
@@ -143,6 +155,7 @@ async def _research(
     max_parallel: int,
     search_provider: str,
     recency: str | None,
+    location: str | None,
     limit: int,
     crawl_provider: str,
     max_rounds: int,
@@ -169,10 +182,21 @@ async def _research(
     )
     effective_model = research_config.model or settings.model
 
+    _RECENCY_TO_TBS = {"d": "qdr:d", "w": "qdr:w", "m": "qdr:m", "y": "qdr:y"}
+    if recency:
+        if search_provider == "firecrawl":
+            search_extra: dict = {"tbs": _RECENCY_TO_TBS[recency]}
+        else:
+            search_extra = {"timelimit": recency}
+    else:
+        search_extra = {}
+    if location and search_provider == "firecrawl":
+        search_extra["location"] = location
+
     search_config = SearchProviderConfig(
         provider=search_provider,
         limit=limit,
-        extra_config={"timelimit": recency} if recency else {},
+        extra_config=search_extra,
     )
     depth_config = SearchDepthConfig(max_search_rounds=max_rounds, crawl_results_per_round=crawl_per_round)
     crawler_config = CrawlerConfig(
@@ -210,6 +234,7 @@ async def _research(
                 num_queries=num_queries,
                 max_queries=research_config.max_queries,
                 model=effective_model,
+                search_provider=search_provider,
             )
         console.print(f"[green]✓[/green] Generated {len(queries)} queries.")
 
@@ -348,6 +373,7 @@ def goal_cmd(
     max_parallel: int,
     search_provider: str,
     recency: str | None,
+    location: str | None,
     limit: int,
     crawl_provider: str,
     max_rounds: int,
@@ -376,6 +402,7 @@ def goal_cmd(
             max_parallel=max_parallel,
             search_provider=search_provider,
             recency=recency,
+            location=location,
             limit=limit,
             crawl_provider=crawl_provider,
             max_rounds=max_rounds,
@@ -405,6 +432,7 @@ async def _goal(
     max_parallel: int,
     search_provider: str,
     recency: str | None,
+    location: str | None,
     limit: int,
     crawl_provider: str,
     max_rounds: int,
@@ -431,10 +459,21 @@ async def _goal(
     )
     effective_model = research_config.model or settings.model
 
+    _RECENCY_TO_TBS = {"d": "qdr:d", "w": "qdr:w", "m": "qdr:m", "y": "qdr:y"}
+    if recency:
+        if search_provider == "firecrawl":
+            search_extra: dict = {"tbs": _RECENCY_TO_TBS[recency]}
+        else:
+            search_extra = {"timelimit": recency}
+    else:
+        search_extra = {}
+    if location and search_provider == "firecrawl":
+        search_extra["location"] = location
+
     search_config = SearchProviderConfig(
         provider=search_provider,
         limit=limit,
-        extra_config={"timelimit": recency} if recency else {},
+        extra_config=search_extra,
     )
     depth_config = SearchDepthConfig(max_search_rounds=max_rounds, crawl_results_per_round=crawl_per_round)
     crawler_config = CrawlerConfig(
@@ -470,6 +509,7 @@ async def _goal(
                 persona=persona,
                 instructions=instructions,
                 model=effective_model,
+                search_provider=search_provider,
             )
         console.print(f"[green]✓[/green] Plan: {len(plan.queries)} queries. Focus: {plan.report_focus[:80]}...")
         if plan.search_strategy.rationale.strip():

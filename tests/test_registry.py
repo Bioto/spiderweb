@@ -9,6 +9,7 @@ from spiderweb.registry import (
     chunker_registry,
     crawler_registry,
     extractor_registry,
+    search_provider_registry,
 )
 
 
@@ -137,7 +138,14 @@ class TestDefaultRegistrations:
         """All default crawlers are registered."""
         assert "http" in crawler_registry
         assert "crawl4ai" in crawler_registry
+        assert "firecrawl" in crawler_registry
         assert "x" in crawler_registry
+
+    def test_search_provider_defaults_registered(self):
+        """Built-in search providers are registered."""
+        assert "duckduckgo" in search_provider_registry
+        assert "stub" in search_provider_registry
+        assert "firecrawl" in search_provider_registry
 
     def test_extractor_defaults_registered(self):
         """Default extractors are registered."""

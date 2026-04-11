@@ -6,7 +6,7 @@ Provides query generation, report synthesis, plan creation, and trace aggregatio
 import asyncio
 import json
 from collections import Counter
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
@@ -25,13 +25,12 @@ from spiderweb.research.models import (
     ListingExtractionPayload,
     ListingItem,
     PageListings,
-    PipelineType,
     ResearchPlan,
     RoundReflection,
     rule_result_line_is_fail,
 )
 from spiderweb.research.storage import ResearchContentStore
-from spiderweb.search.trace import PageRecord, SearchCrawlTrace
+from spiderweb.search.trace import SearchCrawlTrace
 from spiderweb.utils.gluellm_structured import model_from_structured_complete
 from spiderweb.utils.path_utils import sanitize_query_for_path
 
@@ -40,7 +39,7 @@ logger = get_logger(__name__)
 
 def _current_datetime_context() -> str:
     """Return a one-line current date/time for inclusion in LLM prompts."""
-    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    return datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC")
 
 
 def _iter_page_contents(
@@ -430,14 +429,19 @@ Extracted listings (deduplicated):
 {format_instruction}
 
 Report:"""
-    complete_kwargs: dict[str, Any] = {"user_message": prompt, "temperature": 0.2, "timeout": settings.llm_timeout}
+    complete_kwargs: dict[str, Any] = {
+        "user_message": prompt,
+        "temperature": 0.2,
+        "request_timeout": settings.llm_timeout,
+    }
     if model is not None:
         complete_kwargs["model"] = model
     try:
         response = await llm_client.complete(**complete_kwargs)
-    except TypeError:
+    except (TypeError, TimeoutError):
         complete_kwargs.pop("temperature", None)
         complete_kwargs.pop("model", None)
+        complete_kwargs.pop("request_timeout", None)
         complete_kwargs.pop("timeout", None)
         response = await llm_client.complete(**complete_kwargs)
     if hasattr(response, "final_response"):
@@ -497,19 +501,36 @@ You have two sources. Use the **extracted items** for a complete inventory and s
 {format_instruction}
 
 Report:"""
-    complete_kwargs: dict[str, Any] = {"user_message": prompt, "temperature": 0.3, "timeout": settings.llm_timeout}
+    complete_kwargs: dict[str, Any] = {
+        "user_message": prompt,
+        "temperature": 0.3,
+        "request_timeout": settings.llm_timeout,
+    }
     if model is not None:
         complete_kwargs["model"] = model
     try:
         response = await llm_client.complete(**complete_kwargs)
-    except TypeError:
+    except (TypeError, TimeoutError):
         complete_kwargs.pop("temperature", None)
         complete_kwargs.pop("model", None)
+        complete_kwargs.pop("request_timeout", None)
         complete_kwargs.pop("timeout", None)
         response = await llm_client.complete(**complete_kwargs)
     if hasattr(response, "final_response"):
         return response.final_response.strip()
     return str(response).strip()
+
+
+_FIRECRAWL_SEARCH_OPERATOR_HINT = """\
+The search backend is Firecrawl (Google-powered). Your queries should use Google search operators:
+- Exact match: "phrase"
+- Exclude: -term
+- Site restrict: site:example.com
+- Title match: intitle:word, allintitle:word1 word2
+- URL match: inurl:word
+- File type: filetype:pdf
+- Related sites: related:example.com
+Do NOT use DuckDuckGo-specific syntax. Keep queries concise and web-search-friendly."""
 
 
 async def generate_research_queries(
@@ -519,15 +540,17 @@ async def generate_research_queries(
     num_queries: int = 5,
     max_queries: int = 10,
     model: str | None = None,
+    search_provider: str = "duckduckgo",
 ) -> list[str]:
     """Generate research queries from persona and instructions."""
+    provider_hint = f"\n\n{_FIRECRAWL_SEARCH_OPERATOR_HINT}" if search_provider == "firecrawl" else ""
     prompt = f"""Current date and time: {_current_datetime_context()}
 
 You are {persona}.
 
 Your task: {instructions}
 
-Generate as many distinct web search queries as you think are needed for comprehensive coverage, up to a maximum of {max_queries}. The queries should be diverse, use clear searchable language, and avoid redundancy.
+Generate as many distinct web search queries as you think are needed for comprehensive coverage, up to a maximum of {max_queries}. The queries should be diverse, use clear searchable language, and avoid redundancy.{provider_hint}
 
 Return ONLY a JSON array of query strings, nothing else. Example format:
 ["query 1", "query 2", "query 3"]
@@ -869,15 +892,17 @@ async def create_research_plan(
     persona: str | None = None,
     instructions: str | None = None,
     model: str | None = None,
+    search_provider: str = "duckduckgo",
 ) -> ResearchPlan:
     """Create a research plan from a goal."""
     persona_text = f"You are {persona}." if persona else "You are a research agent."
     instructions_text = f"\n\nAdditional instructions: {instructions}" if instructions else ""
+    provider_hint = f"\n\n{_FIRECRAWL_SEARCH_OPERATOR_HINT}" if search_provider == "firecrawl" else ""
     prompt = f"""Current date and time: {_current_datetime_context()}
 
 {persona_text}
 
-Your goal: {goal}{instructions_text}
+Your goal: {goal}{instructions_text}{provider_hint}
 
 You have access to web search and web crawling. Create a research plan with:
 
@@ -917,12 +942,12 @@ Queries should be diverse and maximize coverage."""
     except Exception:
         fallback_prompt = prompt + (
             "\n\nReturn JSON with keys: queries, report_focus, report_format_instructions (optional; "
-            "omit to use default comprehensive report format), pipeline (string: \"listing\", \"narrative\", or \"listing_report\"; "
-            "default \"narrative\"), acceptance_criteria (optional object with rules: string[] and description: string; "
+            'omit to use default comprehensive report format), pipeline (string: "listing", "narrative", or "listing_report"; '
+            'default "narrative"), acceptance_criteria (optional object with rules: string[] and description: string; '
             "required when pipeline is listing or listing_report), rationale (optional), "
             "search_strategy (object with blocked_domains, preferred_domains, validate_url_liveness, "
             "stale_content_patterns, required_content_patterns, query_exclusions, "
-            "query_site_restrictions, rationale — use [] or false/\"\" as appropriate). "
+            'query_site_restrictions, rationale — use [] or false/"" as appropriate). '
             "Legacy key use_listing_extraction (boolean) is accepted if pipeline is omitted: true maps to listing."
         )
         complete_kwargs: dict[str, Any] = {"user_message": fallback_prompt, "temperature": 0.7, "timeout": settings.llm_timeout}

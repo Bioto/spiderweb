@@ -11,8 +11,8 @@ from rich.table import Table
 from spiderweb.api import Spiderweb
 from spiderweb.config import settings
 from spiderweb.models.config import (
-    CrawlExtractionConfig,
     CrawlerConfig,
+    CrawlExtractionConfig,
     SearchDepthConfig,
     SearchProviderConfig,
 )
@@ -33,7 +33,13 @@ console = Console()
     "--recency",
     type=click.Choice(["d", "w", "m", "y"]),
     default=None,
-    help="Filter by recency (duckduckgo timelimit): d (day), w (week), m (month), y (year). Default: none.",
+    help="Filter results by recency: d (day), w (week), m (month), y (year). Maps to 'timelimit' for duckduckgo, 'tbs' for firecrawl. Default: none.",
+)
+@click.option(
+    "--location",
+    type=str,
+    default=None,
+    help="Geo-target search results (firecrawl only). E.g. 'San Francisco,California,United States'. Default: none.",
 )
 @click.option(
     "--limit",
@@ -43,7 +49,7 @@ console = Console()
 )
 @click.option(
     "--crawl-provider",
-    type=click.Choice(["http", "crawl4ai", "x"]),
+    type=click.Choice(["http", "crawl4ai", "firecrawl", "x"]),
     default="crawl4ai",
     help="Crawler backend. Default: crawl4ai.",
 )
@@ -159,6 +165,7 @@ def search_cmd(
     query: str,
     search_provider: str,
     recency: str | None,
+    location: str | None,
     limit: int,
     crawl_provider: str,
     max_rounds: int,
@@ -209,6 +216,7 @@ def search_cmd(
             query,
             search_provider,
             recency,
+            location,
             limit,
             crawl_provider,
             max_rounds,
@@ -237,6 +245,7 @@ async def _search(
     query: str,
     search_provider: str,
     recency: str | None,
+    location: str | None,
     limit: int,
     crawl_provider: str,
     max_rounds: int,
@@ -259,21 +268,33 @@ async def _search(
     crazy: bool,
 ):
     """Async search implementation."""
-    
+
     if crazy:
         max_rounds = 999999
         crawl_per_round = 50
         limit = 30
         max_pages_total = None
         when_deeper = "always"
-    
+
+    # Build search provider extra_config (recency + location)
+    _RECENCY_TO_TBS = {"d": "qdr:d", "w": "qdr:w", "m": "qdr:m", "y": "qdr:y"}
+    if recency:
+        if search_provider == "firecrawl":
+            search_extra: dict = {"tbs": _RECENCY_TO_TBS[recency]}
+        else:
+            search_extra = {"timelimit": recency}
+    else:
+        search_extra = {}
+    if location and search_provider == "firecrawl":
+        search_extra["location"] = location
+
     # Create configs
     search_config = SearchProviderConfig(
         provider=search_provider,
         limit=limit,
-        extra_config={"timelimit": recency} if recency else {},
+        extra_config=search_extra,
     )
-    
+
     depth_config = SearchDepthConfig(
         max_search_rounds=max_rounds,
         crawl_results_per_round=crawl_per_round,
@@ -281,7 +302,7 @@ async def _search(
         num_expanded_queries=expand_queries,
         max_pages_total=max_pages_total,
     )
-    
+
     crawler_config = CrawlerConfig(
         provider=crawl_provider,
         max_depth=1,
@@ -291,14 +312,14 @@ async def _search(
         timeout_seconds=timeout,
         crawl_relevance_prompt=crawl_relevance_prompt,
     )
-    
+
     extraction_config = None
     if extract or semantic_guide:
         extraction_config = CrawlExtractionConfig(
             enabled=True,
             semantic_guide=semantic_guide,
         )
-    
+
     # Initialize LLM client if needed
     llm = None
     if ingest or extract or crawl_relevance_prompt:
@@ -308,13 +329,13 @@ async def _search(
         except Exception as e:
             console.print(f"[red]Error: Failed to initialize LLM client: {e}[/red]")
             return
-    
+
     # Create Spiderweb client
     web = Spiderweb(
         llm_client=llm,
         vector_store_url=store,
     )
-    
+
     try:
         if crazy:
             console.print("[bold yellow]CRAZY mode: no limits — press Ctrl+C to stop[/bold yellow]")
@@ -325,15 +346,15 @@ async def _search(
         console.print(f"  Max rounds: {max_rounds}")
         console.print(f"  Crawl per round: {crawl_per_round}")
         console.print(f"  Strategy: {when_deeper}")
-        
+
         if crawl_relevance_prompt:
-            console.print(f"  Relevance filter: [green]enabled[/green]")
-        
+            console.print("  Relevance filter: [green]enabled[/green]")
+
         if extraction_config and extraction_config.enabled:
-            console.print(f"  Extraction: [green]enabled[/green]")
+            console.print("  Extraction: [green]enabled[/green]")
             if semantic_guide:
                 console.print(f"  Guide: {semantic_guide}")
-        
+
         with console.status("[bold cyan]Searching and crawling..."):
             trace = await web.search_crawl_extract(
                 query=query,
@@ -347,13 +368,13 @@ async def _search(
                 save_trace_to=save_trace,
                 trace_format=trace_format,
             )
-        
+
         # Display results
-        console.print(f"\n[green]✓[/green] Search-crawl complete")
+        console.print("\n[green]✓[/green] Search-crawl complete")
         console.print(f"  Total rounds: {len(trace.rounds)}")
         console.print(f"  Total pages crawled: {len(trace.get_all_urls())}")
         console.print(f"  Total filtered out: {len(trace.get_all_filtered_urls())}")
-        
+
         # Show summary table
         table = Table()
         table.add_column("Round", style="cyan")
@@ -361,7 +382,7 @@ async def _search(
         table.add_column("Results", style="green")
         table.add_column("Crawled", style="magenta")
         table.add_column("Filtered", style="red")
-        
+
         for round_data in trace.rounds:
             table.add_row(
                 str(round_data.round_number),
@@ -370,10 +391,10 @@ async def _search(
                 str(len(round_data.pages)),
                 str(len(round_data.filtered_out)),
             )
-        
+
         console.print("\n")
         console.print(table)
-        
+
         # Show sample pages
         if trace.rounds:
             console.print("\n[bold]Sample crawled pages:[/bold]")
@@ -382,7 +403,7 @@ async def _search(
                     console.print(f"  • {page.url}")
                     if page.summary:
                         console.print(f"    {page.summary[:100]}...")
-        
+
         if save_to:
             save_dir = Path(save_to) / sanitize_query_for_path(query)
             console.print(f"\n[green]✓[/green] Crawled content saved to: {save_dir}")
@@ -395,7 +416,7 @@ async def _search(
                 trace_dir = base
             trace_path = trace_dir / f"{query_slug}.{trace_format}"
             console.print(f"[green]✓[/green] Trace saved to: {trace_path}")
-    
+
     except Exception as e:
         console.print(f"[red]Error: {e}[/red]")
         import traceback

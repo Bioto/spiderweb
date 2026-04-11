@@ -67,10 +67,10 @@ class SpiderwebSettings(BaseSettings):
         description="Default LLM model for chat/completion. Used by research and other LLM calls. When None, GlueLLM uses its own default.",
     )
     llm_timeout: float = Field(
-        default=300.0,
+        default=1800.0,
         ge=1.0,
-        le=3600.0,
-        description="Timeout in seconds for LLM completion requests (e.g. research summarization). Default 300.",
+        le=7200.0,
+        description="Timeout in seconds for LLM completion requests (e.g. research summarization). Default 1800.",
     )
 
     # Vector store settings
@@ -253,6 +253,10 @@ class SpiderwebSettings(BaseSettings):
     opensky_client_secret: str | None = Field(
         default=None,
         description="OpenSky Network API OAuth2 client secret. Set SPIDERWEB_OPENSKY_CLIENT_SECRET.",
+    )
+    firecrawl_api_key: str | None = Field(
+        default=None,
+        description="Firecrawl API key for crawler provider 'firecrawl'. Set SPIDERWEB_FIRECRAWL_API_KEY (or FIRECRAWL_API_KEY).",
     )
 
     # Search depth settings

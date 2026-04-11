@@ -668,7 +668,8 @@ class CrawlerConfig(BaseModel):
     link following, rate limiting, and content extraction.
     
     The provider field accepts any string. Built-in providers are "crawl4ai",
-    "http", and "x" (X API v2 for x.com/twitter.com status URLs). Custom crawlers
+    "firecrawl" (hosted Firecrawl scrape API), "http", and "x" (X API v2 for
+    x.com/twitter.com status URLs). Custom crawlers
     can be registered in the crawler_registry.
     
     Example:
@@ -681,7 +682,7 @@ class CrawlerConfig(BaseModel):
     
     provider: str = Field(
         default_factory=lambda: settings.default_crawler_provider,
-        description="Crawler backend to use (built-in: 'crawl4ai', 'http', 'x', or custom)",
+        description="Crawler backend to use (built-in: 'crawl4ai', 'firecrawl', 'http', 'x', or custom)",
     )
     
     # Crawl behavior
@@ -778,7 +779,9 @@ class CrawlerConfig(BaseModel):
             "Additional provider-specific configuration. "
             "For crawl4ai provider, keys are passed through to crawl4ai's CrawlerRunConfig "
             "(e.g. page_timeout, check_robots_txt, js_code, wait_for, css_selector, screenshot, "
-            "exclude_external_links, etc.). For 'x' provider, use x_bearer_token and optionally x_scraper_config (XScraperConfig.model_dump())."
+            "exclude_external_links, etc.). For 'firecrawl' provider, keys are passed to "
+            "Firecrawl ScrapeOptions (e.g. only_main_content, proxy); reserved: firecrawl_api_key, "
+            "firecrawl_api_url. For 'x' provider, use x_bearer_token and optionally x_scraper_config (XScraperConfig.model_dump())."
         ),
     )
 
@@ -1164,7 +1167,10 @@ class SearchProviderConfig(BaseModel):
         default_factory=dict,
         description=(
             "Additional provider-specific configuration. "
-            "For duckduckgo (ddgs): region, safesearch, timeout, timelimit (d/w/m/y), backend (e.g. duckduckgo, bing, brave), page."
+            "For duckduckgo (ddgs): region, safesearch, timeout, timelimit (d/w/m/y), backend (e.g. duckduckgo, bing, brave), page. "
+            "For firecrawl: firecrawl_api_key, firecrawl_api_url (self-hosted), sources (e.g. [\"web\"] or [\"web\",\"news\"]), "
+            "location, tbs (Google-style date filter), timeout (request timeout in ms, max 300000), categories, "
+            "ignore_invalid_urls, integration, scrape_options."
         ),
     )
     

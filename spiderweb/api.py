@@ -22,8 +22,8 @@ from spiderweb.models.config import (
     ChunkAddOnConfig,
     ChunkerConfig,
     ContextWindowConfig,
-    CrawlExtractionConfig,
     CrawlerConfig,
+    CrawlExtractionConfig,
     GraphStoreConfig,
     HybridConfig,
     QueryExpansionConfig,
@@ -42,8 +42,8 @@ from spiderweb.pipeline.context import ContextRetriever
 from spiderweb.pipeline.processor import DocumentProcessor
 from spiderweb.pipeline.query_expansion import QueryExpander, reciprocal_rank_fusion
 from spiderweb.registry import chunker_registry, crawler_registry, extractor_registry, search_provider_registry
-from spiderweb.search.base import SearchResult, SearchResultBatch
 from spiderweb.research.models import GoalResult, SearchStrategy
+from spiderweb.search.base import SearchResult, SearchResultBatch
 from spiderweb.search.content_filter import (
     detect_stale_content,
     page_content_for_filtering,
@@ -367,23 +367,24 @@ class Spiderweb:
                 "llm_client is required for adaptive chunking. "
                 "Provide llm_client when initializing Spiderweb."
             )
-        
+
         from pathlib import Path
+
         from spiderweb.chunking_agent import choose_chunking_strategy, create_chunker_from_strategy
-        
+
         path = Path(file_path)
-        
+
         # 1. Load document to get preview
         logger.info(f"Loading document preview for adaptive chunking: {path.name}")
         document = await self.document_processor.file_loader.load(path)
-        
+
         # Override document ID if provided
         if document_id:
             document.id = document_id
-        
+
         # 2. Build preview (use markdown_content if available, otherwise raw_content)
         preview_text = document.markdown_content[:preview_max_chars] if document.markdown_content else document.raw_content[:preview_max_chars]
-        
+
         # 3. Choose chunking strategy using LLM agent
         logger.info(f"Analyzing document to select chunking strategy: {path.name}")
         choice = await choose_chunking_strategy(
@@ -391,18 +392,18 @@ class Spiderweb:
             document_preview=preview_text,
             file_name=path.name,
         )
-        
+
         logger.info(
             f"Selected chunking strategy '{choice.strategy}' for {path.name}: {choice.rationale}"
         )
-        
+
         # 4. Create chunker from selected strategy
         chunker = create_chunker_from_strategy(
             strategy=choice.strategy,
             base_config=self.chunker_config,
             llm_client=self.llm_client,
         )
-        
+
         # 5. Process document with the selected chunker
         return await self.document_processor.process(
             file_path=file_path,
@@ -514,21 +515,21 @@ class Spiderweb:
             # Handle query expansion if enabled
             elif query_expansion and query_expansion.enabled:
                 logger.info(f"Query expansion enabled with strategy: {query_expansion.strategy}")
-                
+
                 # Expand the query
                 expander = QueryExpander(self.llm_client, query_expansion)
                 expanded_queries = await expander.expand(query)
                 expansion_strategy = query_expansion.strategy
-                
+
                 logger.debug(f"Expanded into {len(expanded_queries)} queries: {expanded_queries}")
-                
+
                 # Search with each expanded query
                 all_query_results = []
                 for exp_query in expanded_queries:
                     # Generate embedding for this query
                     embedding_result = await self.llm_client.embed(exp_query)
                     query_embedding = embedding_result.embeddings[0]
-                    
+
                     # Search vector store
                     results = await self.document_processor.vector_store.query(
                         embedding=query_embedding,
@@ -536,13 +537,13 @@ class Spiderweb:
                         filter_dict=filter_dict,
                     )
                     all_query_results.append(results)
-                
+
                 # Combine results using Reciprocal Rank Fusion
                 results = reciprocal_rank_fusion(all_query_results, k=query_expansion.rrf_k)
-                
+
                 # Limit to top_k after fusion
                 results = results[:top_k]
-                
+
             else:
                 # Standard single query path
                 # Generate query embedding
@@ -606,7 +607,7 @@ class Spiderweb:
             # Retrieve context if requested
             if context_window:
                 retriever = ContextRetriever(vector_store=self.document_processor.vector_store)
-                
+
                 context_by_match = await retriever.get_context_for_matches(
                     matches=matched_chunks,
                     config=context_window,
@@ -616,7 +617,7 @@ class Spiderweb:
                 # Collect all unique context chunks
                 all_context_chunks = []
                 seen_ids = set()
-                
+
                 for match_context in context_by_match.values():
                     for ctx_chunk in match_context.chunks:
                         chunk_id = ctx_chunk.chunk["id"]
@@ -990,7 +991,7 @@ class Spiderweb:
             crawler_config=crawler_config,
             extraction_config=extraction_config,
         )
-        
+
         try:
             # Initialize file storage if requested
             storage = None
@@ -998,15 +999,16 @@ class Spiderweb:
                 from spiderweb.crawlers.storage import CrawlStorage
                 storage = CrawlStorage(output_dir=save_to)
                 logger.info(f"Will save crawled content to {save_to}")
-        
+
             is_list = isinstance(url, list)
             urls = url if is_list else [url]
-        
+
             # Discover URLs from sitemap if enabled
             if crawler_config and crawler_config.use_sitemap:
-                from spiderweb.crawlers.sitemap import discover_sitemap_url, parse_sitemap
                 import aiohttp
-            
+
+                from spiderweb.crawlers.sitemap import discover_sitemap_url, parse_sitemap
+
                 sitemap_urls = []
                 async with aiohttp.ClientSession() as session:
                     for base_url in urls:
@@ -1017,88 +1019,85 @@ class Spiderweb:
                             logger.info(f"Discovered {len(discovered)} URLs from sitemap: {sitemap_url}")
                         except Exception as e:
                             logger.warning(f"Failed to parse sitemap {sitemap_url}: {e}")
-            
+
                 if sitemap_urls:
                     # Merge discovered URLs with original URLs (deduplicate)
                     all_urls = list(set(urls + sitemap_urls))
                     logger.info(f"Merged {len(sitemap_urls)} sitemap URLs with {len(urls)} original URLs")
                     urls = all_urls
-        
+
             logger.info(f"Crawling {len(urls)} URL(s) (ingest={ingest}, save_to={save_to})")
-        
+
             if not ingest:
                 # Just crawl and return raw results
                 if is_list or (crawler_config and crawler_config.max_depth > 1):
                     # Use crawl_many for multiple URLs or link following
                     results = await web_loader.crawler.crawl_many(urls, crawler_config)
-                
+
                     # Save to local storage if requested
                     if storage:
                         for result in results:
                             if isinstance(result, CrawlResult):
                                 storage.save_crawl_result(result, format=save_format)
                         storage.create_index()
-                
-                    return results
-                else:
-                    # Single URL, simple crawl
-                    result = await web_loader.crawler.crawl(urls[0], crawler_config)
-                
-                    # Save to local storage if requested
-                    if storage and isinstance(result, CrawlResult):
-                        storage.save_crawl_result(result, format=save_format)
-                
-                    return result
-        
-            else:
-                # Crawl and ingest into vector store
-                if is_list or (crawler_config and crawler_config.max_depth > 1):
-                    # Load multiple documents
-                    documents = await web_loader.load_many(
-                        urls,
-                        crawler_config=crawler_config,
-                        extraction_config=extraction_config,
-                        output_schema=output_schema,
-                    )
-                
-                    # Ingest each document via single pipeline path
-                    results = []
-                    for doc in documents:
-                        result = await self.document_processor.process_document(
-                            doc, store_chunks=True
-                        )
-                        results.append(result)
 
-                    successful = sum(1 for r in results if r.success)
-                    errors_by_source = {
-                        doc.metadata.source: r.errors
-                        for doc, r in zip(documents, results, strict=True)
-                        if r.errors
-                    }
-                    return BatchIngestionResult(
-                        total_documents=len(documents),
-                        successful_documents=successful,
-                        failed_documents=len(results) - successful,
-                        total_chunks=sum(r.chunks_created for r in results),
-                        total_chunks_validated=sum(r.chunks_validated for r in results),
-                        total_chunks_rejected=sum(r.chunks_rejected for r in results),
-                        processing_time_seconds=sum(r.processing_time_seconds for r in results),
-                        average_time_per_document=sum(r.processing_time_seconds for r in results) / len(results) if results else 0.0,
-                        results=results,
-                        errors=errors_by_source,
-                    )
-            
-                else:
-                    # Single document
-                    doc = await web_loader.load(
-                        urls[0],
-                        crawler_config=crawler_config,
-                        extraction_config=extraction_config,
-                        output_schema=output_schema,
-                    )
-                    return await self.document_processor.process_document(
+                    return results
+                # Single URL, simple crawl
+                result = await web_loader.crawler.crawl(urls[0], crawler_config)
+
+                # Save to local storage if requested
+                if storage and isinstance(result, CrawlResult):
+                    storage.save_crawl_result(result, format=save_format)
+
+                return result
+
+            # Crawl and ingest into vector store
+            if is_list or (crawler_config and crawler_config.max_depth > 1):
+                # Load multiple documents
+                documents = await web_loader.load_many(
+                    urls,
+                    crawler_config=crawler_config,
+                    extraction_config=extraction_config,
+                    output_schema=output_schema,
+                )
+
+                # Ingest each document via single pipeline path
+                results = []
+                for doc in documents:
+                    result = await self.document_processor.process_document(
                         doc, store_chunks=True
                     )
+                    results.append(result)
+
+                successful = sum(1 for r in results if r.success)
+                errors_by_source = {
+                    doc.metadata.source: r.errors
+                    for doc, r in zip(documents, results, strict=True)
+                    if r.errors
+                }
+                return BatchIngestionResult(
+                    total_documents=len(documents),
+                    successful_documents=successful,
+                    failed_documents=len(results) - successful,
+                    total_chunks=sum(r.chunks_created for r in results),
+                    total_chunks_validated=sum(r.chunks_validated for r in results),
+                    total_chunks_rejected=sum(r.chunks_rejected for r in results),
+                    processing_time_seconds=sum(r.processing_time_seconds for r in results),
+                    average_time_per_document=sum(r.processing_time_seconds for r in results) / len(results) if results else 0.0,
+                    results=results,
+                    errors=errors_by_source,
+                )
+
+            # Single document
+            doc = await web_loader.load(
+                urls[0],
+                crawler_config=crawler_config,
+                extraction_config=extraction_config,
+                output_schema=output_schema,
+            )
+            return await self.document_processor.process_document(
+                doc, store_chunks=True
+            )
 
         finally:
             await web_loader.close()
@@ -1157,13 +1156,13 @@ class Spiderweb:
         search_config = search_provider_config or SearchProviderConfig()
         crawler_config = crawler_config or CrawlerConfig()
         depth_config = depth_config or SearchDepthConfig()
-        
+
         # Use settings defaults if not provided
         if save_format is None:
             save_format = settings.default_save_format
         if trace_format is None:
             trace_format = settings.default_trace_format
-        
+
         # Create trace
         snapshot: dict = {
             "search_provider": search_config.provider,
@@ -1174,7 +1173,7 @@ class Spiderweb:
         if search_strategy is not None:
             snapshot["search_strategy"] = search_strategy.model_dump()
         trace = SearchCrawlTrace(original_query=query, config_snapshot=snapshot)
-        
+
         # Initialize search provider
         try:
             search_provider = search_provider_registry.create(
@@ -1194,14 +1193,14 @@ class Spiderweb:
                 f"Unknown search provider: {search_config.provider}. "
                 f"Available search providers: {available_search}.{hint}"
             ) from e
-        
+
         # Initialize web loader for crawling
         web_loader = WebLoader(
             llm_client=self.llm_client,
             crawler_config=crawler_config,
             extraction_config=extraction_config,
         )
-        
+
         try:
             # Initialize storage if needed (by query so each search has its own subdir)
             storage = None
@@ -1211,28 +1210,28 @@ class Spiderweb:
                 output_dir = Path(save_to) / query_slug
                 storage = CrawlStorage(output_dir=output_dir)
                 logger.info(f"Will save crawled content to {output_dir}")
-        
+
             # Track total pages crawled
             total_pages_crawled = 0
             all_crawled_urls = set()
-        
+
             # Multi-round search loop
             queries_to_try = [query]
-        
+
             for round_num in range(1, depth_config.max_search_rounds + 1):
                 logger.info(f"Search round {round_num}/{depth_config.max_search_rounds}")
-            
+
                 # Check if we've hit max pages limit
                 if depth_config.max_pages_total and total_pages_crawled >= depth_config.max_pages_total:
                     logger.info(f"Reached max_pages_total limit ({depth_config.max_pages_total})")
                     break
-            
+
                 # Generate expanded queries if needed
                 if round_num > 1 and depth_config.when_to_go_deeper == "expand_queries":
                     if self.llm_client:
-                        from spiderweb.pipeline.query_expansion import QueryExpander
                         from spiderweb.models.config import QueryExpansionConfig
-                    
+                        from spiderweb.pipeline.query_expansion import QueryExpander
+
                         expander = QueryExpander(
                             self.llm_client,
                             QueryExpansionConfig(
@@ -1250,15 +1249,15 @@ class Spiderweb:
                 elif round_num == 1:
                     # First round: use original query
                     queries_to_try = [query]
-            
+
                 # Set current_query for this round (used in trace)
                 current_query = queries_to_try[0] if queries_to_try else query
-            
+
                 # Execute searches for this round
                 round_pages = []
                 round_filtered = []
                 round_search_results = []
-            
+
                 for search_query in queries_to_try:
                     effective_query = (
                         augment_search_query(search_query, search_strategy)
@@ -1273,7 +1272,7 @@ class Spiderweb:
                         **search_config.extra_config,
                     )
                     round_search_results.extend(search_results.results)
-            
+
                 # Dedupe URLs
                 seen_urls = set()
                 unique_results = []
@@ -1307,7 +1306,7 @@ class Spiderweb:
                         use_llm=crawler_config.crawl_relevance_use_llm,
                     )
                     candidates_to_crawl = good_candidates
-                
+
                     # Record filtered candidates
                     for bad in bad_candidates:
                         if isinstance(bad, FilteredCandidate):
@@ -1324,7 +1323,7 @@ class Spiderweb:
                                     filter_reason=bad.get("filter_reason", "relevance"),
                                 )
                             )
-            
+
                 # Limit to crawl_results_per_round and respect max_pages_total
                 remaining_slots = depth_config.crawl_results_per_round
                 if depth_config.max_pages_total:
@@ -1332,9 +1331,9 @@ class Spiderweb:
                         remaining_slots,
                         depth_config.max_pages_total - total_pages_crawled,
                     )
-            
+
                 candidates_to_crawl = candidates_to_crawl[:remaining_slots]
-            
+
                 if not candidates_to_crawl:
                     logger.info("No candidates to crawl in this round")
                     # Still record the round with filtered results
@@ -1350,7 +1349,7 @@ class Spiderweb:
                     )
                     trace.add_round(round_data)
                     break
-            
+
                 # Extract URLs and drop candidates with empty/missing URL so crawler never sees invalid URLs
                 valid_pairs = []
                 for r in candidates_to_crawl:
@@ -1398,15 +1397,15 @@ class Spiderweb:
                 # Crawl
                 logger.info(f"Crawling {len(urls_to_crawl)} URLs")
                 crawl_results = await web_loader.crawler.crawl_many(urls_to_crawl, crawler_config)
-            
+
                 # Build PageRecords
                 for i, crawl_result in enumerate(crawl_results):
                     if not isinstance(crawl_result, CrawlResult):
                         continue
-                
+
                     candidate = candidates_to_crawl[i]
                     url = candidate.url if isinstance(candidate, SearchResult) else candidate.get("url", "")
-                
+
                     # Generate summary (truncate or use LLM if available)
                     summary = None
                     if crawl_result.markdown:
@@ -1466,7 +1465,7 @@ class Spiderweb:
                     extracted_data = None
                     if extraction_config and extraction_config.enabled and self.llm_client:
                         from spiderweb.crawlers.extraction import CrawlExtractor
-                    
+
                         extractor = CrawlExtractor(self.llm_client, extraction_config)
                         try:
                             extracted_data = await extractor.extract(
@@ -1477,7 +1476,7 @@ class Spiderweb:
                             )
                         except Exception as e:
                             logger.warning(f"Extraction failed for {url}: {e}")
-                
+
                     page_record = PageRecord(
                         url=url,
                         summary=summary,
@@ -1494,11 +1493,11 @@ class Spiderweb:
                     round_pages.append(page_record)
                     all_crawled_urls.add(url)
                     total_pages_crawled += 1
-                
+
                     # Save to local storage if requested
                     if storage:
                         storage.save_crawl_result(crawl_result, format=save_format)
-            
+
                 # Create SearchRound and add to trace
                 round_data = SearchRound(
                     query=current_query,
@@ -1511,20 +1510,20 @@ class Spiderweb:
                     filtered_out=round_filtered,
                 )
                 trace.add_round(round_data)
-            
+
                 # Decide if we should continue
                 if round_num >= depth_config.max_search_rounds:
                     break
-            
+
                 if depth_config.when_to_go_deeper == "always":
                     # Continue to next round
                     continue
-                elif depth_config.when_to_go_deeper == "if_not_found":
+                if depth_config.when_to_go_deeper == "if_not_found":
                     # Check if answer found (simplified: check if we got good results)
                     if len(round_pages) >= depth_config.crawl_results_per_round // 2:
                         logger.info("Sufficient results found, stopping")
                         break
-        
+
             # Save trace if requested (by query so each search has its own file)
             if save_trace_to:
                 base = Path(save_trace_to)
@@ -1537,11 +1536,11 @@ class Spiderweb:
                 trace_path = trace_dir / f"{query_slug}.{trace_format}"
                 write_trace(trace, trace_path, format=trace_format)
                 logger.info(f"Saved trace to {trace_path}")
-        
+
             # Create index if storage was used
             if storage:
                 storage.create_index()
-        
+
             # Handle ingestion if requested
             if ingest:
                 for round_data in trace.rounds:
@@ -1556,7 +1555,7 @@ class Spiderweb:
                             await self.document_processor.process_document(
                                 doc, store_chunks=True
                             )
-        
+
             return trace
 
         finally:
@@ -1594,21 +1593,21 @@ class Spiderweb:
             synthesize_report_from_summaries,
             validate_items,
         )
-        from spiderweb.workflows.research import GoalResearchWorkflow
         from spiderweb.research.models import PipelineType
         from spiderweb.search.content_filter import filter_stale_listings
+        from spiderweb.workflows.research import GoalResearchWorkflow
 
         rc = research_config or ResearchAgentConfig()
         effective_model = model or rc.model
+        sp = search_provider_config or SearchProviderConfig()
         plan = await create_research_plan(
             self.llm_client,
             goal=goal,
             persona=persona,
             instructions=instructions,
             model=effective_model,
+            search_provider=sp.provider,
         )
-
-        sp = search_provider_config or SearchProviderConfig()
         cc = crawler_config or CrawlerConfig(
             wait_until="domcontentloaded",
             scan_full_page=True,
@@ -1820,9 +1819,9 @@ class Spiderweb:
         """
         if not self.llm_client:
             raise ValueError("LLM client required for crawl_and_query")
-        
+
         logger.info(f"Crawl and query: crawling {len(urls)} URLs then querying with: {query}")
-        
+
         # Crawl and ingest the URLs
         await self.crawl(
             url=urls,
@@ -1830,7 +1829,7 @@ class Spiderweb:
             extraction_config=extraction_config,
             ingest=True,
         )
-        
+
         # Now query the vector store (includes fresh content)
         return await self.query(
             query=query,
