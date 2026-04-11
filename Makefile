@@ -37,11 +37,11 @@ init:
 
 # Build images
 build: init
-	docker-compose build
+	docker compose build
 
 # Start services
 up: init
-	docker-compose up -d
+	docker compose up -d
 	@echo ""
 	@echo "✓ Services started!"
 	@echo "  Qdrant Dashboard: http://localhost:6333/dashboard"
@@ -51,25 +51,25 @@ up: init
 
 # Start in development mode
 dev:
-	docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+	docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
 	@echo ""
 	@echo "✓ Development mode started with live code mounting"
 
 # Stop services
 down:
-	docker-compose down
+	docker compose down
 
 # Restart services
 restart:
-	docker-compose restart
+	docker compose restart
 
 # View logs
 logs:
-	docker-compose logs -f spiderweb
+	docker compose logs -f spiderweb
 
 # Open shell in container
 shell:
-	docker-compose exec spiderweb /bin/bash
+	docker compose exec spiderweb /bin/bash
 
 # Crawl a URL
 crawl:
@@ -80,9 +80,9 @@ ifndef URL
 	@exit 1
 endif
 ifdef SAVE
-	docker-compose exec spiderweb spiderweb crawl $(URL) --save-to $(SAVE) $(ARGS)
+	docker compose exec spiderweb spiderweb crawl $(URL) --save-to $(SAVE) $(ARGS)
 else
-	docker-compose exec spiderweb spiderweb crawl $(URL) $(ARGS)
+	docker compose exec spiderweb spiderweb crawl $(URL) $(ARGS)
 endif
 
 # Query vector store
@@ -92,7 +92,7 @@ ifndef Q
 	@echo "Usage: make query Q=\"search term\""
 	@exit 1
 endif
-	docker-compose exec spiderweb spiderweb query "$(Q)" --store qdrant://qdrant:6333/docs $(ARGS)
+	docker compose exec spiderweb spiderweb query "$(Q)" --store qdrant://qdrant:6333/docs $(ARGS)
 
 # Ingest files
 ingest:
@@ -101,11 +101,11 @@ ifndef PATH
 	@echo "Usage: make ingest PATH=/app/examples"
 	@exit 1
 endif
-	docker-compose exec spiderweb spiderweb ingest $(PATH) --store qdrant://qdrant:6333/docs $(ARGS)
+	docker compose exec spiderweb spiderweb ingest $(PATH) --store qdrant://qdrant:6333/docs $(ARGS)
 
 # Run tests (in Docker)
 test:
-	docker-compose exec spiderweb pytest tests/ -v
+	docker compose exec spiderweb pytest tests/ -v
 
 # Run tests locally (without Docker)
 test-local:
@@ -117,11 +117,11 @@ test-cov:
 
 # Clean up containers and volumes
 clean:
-	docker-compose down -v
+	docker compose down -v
 
 # Deep clean (including images)
 clean-all:
-	docker-compose down -v --rmi all
+	docker compose down -v --rmi all
 	docker system prune -f
 
 # Check if Qdrant is ready
@@ -131,23 +131,23 @@ check-qdrant:
 
 # Quick examples
 example-basic:
-	docker-compose exec spiderweb spiderweb crawl https://example.com
+	docker compose exec spiderweb spiderweb crawl https://example.com
 
 example-save-local:
-	docker-compose exec spiderweb spiderweb crawl https://example.com --save-to /app/data/crawled
+	docker compose exec spiderweb spiderweb crawl https://example.com --save-to /app/data/crawled
 
 example-crawl-depth:
-	docker-compose exec spiderweb spiderweb crawl https://example.com --depth 2 --max-pages 10
+	docker compose exec spiderweb spiderweb crawl https://example.com --depth 2 --max-pages 10
 
 example-ingest:
-	docker-compose exec spiderweb spiderweb crawl https://example.com \
+	docker compose exec spiderweb spiderweb crawl https://example.com \
 		--ingest --store qdrant://qdrant:6333/docs
 
 example-save-and-ingest:
-	docker-compose exec spiderweb spiderweb crawl https://example.com \
+	docker compose exec spiderweb spiderweb crawl https://example.com \
 		--save-to /app/data/backup --ingest --store qdrant://qdrant:6333/docs
 
 example-query:
-	docker-compose exec spiderweb spiderweb query "example" \
+	docker compose exec spiderweb spiderweb query "example" \
 		--store qdrant://qdrant:6333/docs --top-k 5
 
