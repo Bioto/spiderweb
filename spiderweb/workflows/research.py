@@ -1,6 +1,6 @@
 """Iterative goal-driven listing research: search, extract, validate, reflect, repeat.
 
-Plain async workflow (same style as ``XSearchExpandWorkflow``): not gluellm's text-in/out
+Plain async workflow (same style as ``XSearchExpandWorkflow``): not a text-in/out
 ``Workflow`` ABC. Callers inject ``run_query`` so orchestration stays testable and avoids
 import cycles with ``Spiderweb``.
 """
@@ -25,7 +25,7 @@ from spiderweb.search.content_filter import filter_stale_listings
 from spiderweb.search.trace import SearchCrawlTrace
 
 if TYPE_CHECKING:
-    from gluellm import GlueLLM
+    from superglue import GlueLLM
 
 ResearchGoalProgressCallback = Callable[[str, int | None, int | None, Any | None], None]
 

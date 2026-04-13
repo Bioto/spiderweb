@@ -22,7 +22,7 @@ def _get_spiderweb_instance(vector_store_url: str | None = None) -> Spiderweb:
     Returns:
         Spiderweb instance
     """
-    from gluellm import GlueLLM
+    from superglue import GlueLLM
 
     llm = None
     try:

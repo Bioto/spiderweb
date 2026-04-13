@@ -104,7 +104,7 @@ See [docker/README.md](docker/README.md) and [SETUP.md](SETUP.md) for details.
 
 ```python
 import asyncio
-from gluellm import GlueLLM
+from superglue import GlueLLM
 from spiderweb import Spiderweb
 
 async def main():

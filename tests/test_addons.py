@@ -177,7 +177,9 @@ class TestFactsAddOn:
         addon = FactsAddOn(llm_client=mock_llm, max_facts=10)
         chunks = [_make_chunk("The capital of France is Paris. It was founded in 300 BC.")]
 
-        result = await addon.process_async(chunks)
+        # Force the ``llm_client.complete`` path (skip module-level structured_complete).
+        with patch("spiderweb.addons.facts.structured_complete", side_effect=ImportError("test skip")):
+            result = await addon.process_async(chunks)
 
         assert result == chunks
         assert "facts" in chunks[0].metadata.extra
@@ -189,8 +191,8 @@ class TestFactsAddOn:
         mock_llm = AsyncMock()
         facts_response = FactsResponse(facts=["Fact 1", "Fact 2", "Fact 3"])
 
-        # Patch where it's imported from (facts.py does "from gluellm.api import structured_complete")
-        with patch("gluellm.api.structured_complete", new_callable=AsyncMock) as mock_structured:
+        # Patch the name bound in facts.py (import-time alias).
+        with patch("spiderweb.addons.facts.structured_complete", new_callable=AsyncMock) as mock_structured:
             mock_structured.return_value = SimpleNamespace(
                 structured_output=facts_response, final_response=""
             )
@@ -210,7 +212,7 @@ class TestFactsAddOn:
         mock_llm = AsyncMock()
         facts_response = FactsResponse(facts=[f"Fact {i}" for i in range(20)])
 
-        with patch("gluellm.api.structured_complete", new_callable=AsyncMock) as mock_structured:
+        with patch("spiderweb.addons.facts.structured_complete", new_callable=AsyncMock) as mock_structured:
             mock_structured.return_value = SimpleNamespace(
                 structured_output=facts_response, final_response=""
             )

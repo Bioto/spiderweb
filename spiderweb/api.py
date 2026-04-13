@@ -1,7 +1,7 @@
 """Spiderweb API - High-level interface for document processing and RAG.
 
 This module provides the main API functions for working with Spiderweb,
-following the same patterns as gluellm for a consistent user experience.
+following the same patterns as superglue for a consistent user experience.
 """
 
 import asyncio
@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Literal, overload
 
 if TYPE_CHECKING:
-    from gluellm import GlueLLM
+    from superglue import GlueLLM
 
     from spiderweb.extractors.base import Extractor
 
@@ -122,7 +122,7 @@ class Spiderweb:
     Provides a high-level interface for ingesting documents and querying them.
 
     Example:
-        >>> from gluellm import GlueLLM
+        >>> from superglue import GlueLLM
         >>> from spiderweb import Spiderweb
         >>>
         >>> async with Spiderweb(llm_client=GlueLLM()) as web:
@@ -354,7 +354,7 @@ class Spiderweb:
             ExtractionError: If extraction fails
         
         Example:
-            >>> from gluellm import GlueLLM
+            >>> from superglue import GlueLLM
             >>> from spiderweb import Spiderweb
             >>> 
             >>> llm = GlueLLM()
@@ -825,7 +825,7 @@ class Spiderweb:
         """Run the default X workflow: search → top Y tweets → expand to each poster's followers/following.
 
         Uses the built-in XSearchExpandWorkflow. When llm_client is set and expand_query is True,
-        the query is rewritten into an X Search API query via GlueLLM before searching.
+        the query is rewritten into an X Search API query via the LLM client before searching.
 
         Optionally ingests all resulting CrawlResults (tweets + user profiles) with the full
         pipeline (entities, graph, vector store).
@@ -1874,7 +1874,7 @@ class Spiderweb:
                     logger.warning("Error closing vector store: %s", e)
 
 
-# Convenience functions for quick usage (gluellm-style)
+# Convenience functions for quick usage (superglue-style)
 
 
 async def ingest(
@@ -1893,7 +1893,7 @@ async def ingest(
         Processed document with chunks
 
     Example:
-        >>> from gluellm import GlueLLM
+        >>> from superglue import GlueLLM
         >>> from spiderweb import ingest
         >>>
         >>> doc = await ingest("document.pdf", llm_client=GlueLLM())
@@ -1928,7 +1928,7 @@ async def process_directory(
         Batch ingestion result
 
     Example:
-        >>> from gluellm import GlueLLM
+        >>> from superglue import GlueLLM
         >>> from spiderweb import process_directory
         >>>
         >>> result = await process_directory(
@@ -1978,7 +1978,7 @@ async def query(
         Query result, optionally with context
 
     Example:
-        >>> from gluellm import GlueLLM
+        >>> from superglue import GlueLLM
         >>> from spiderweb import query
         >>> from spiderweb.models.config import QueryExpansionConfig
         >>>

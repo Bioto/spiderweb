@@ -1,13 +1,13 @@
 """Crawl relevance filtering using LLM batching.
 
 Filters URLs/links based on a prompt describing what is good vs bad
-to crawl, using GlueLLM's batching feature for efficiency.
+to crawl, using concurrent LLM calls for efficiency.
 """
 
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from gluellm import GlueLLM
+    from superglue import GlueLLM
 
 from spiderweb.observability.logging_config import get_logger
 from spiderweb.search.base import SearchResult
@@ -23,11 +23,11 @@ async def filter_by_relevance(
 ) -> tuple[list[SearchResult | dict[str, Any]], list[SearchResult | dict[str, Any]]]:
     """Filter candidates by relevance using LLM batching.
     
-    Uses GlueLLM's batching feature to evaluate multiple candidates
+    Uses concurrent LLM calls to evaluate multiple candidates
     in one or few calls, classifying each as "good" or "bad" to crawl.
     
     Args:
-        llm_client: GlueLLM client (required if use_llm=True)
+        llm_client: LLM client with ``generate()`` (required if use_llm=True)
         candidates: List of SearchResult objects or dicts with url/title/snippet
         relevance_prompt: Prompt describing what is good vs bad to crawl
         use_llm: If True, use LLM; if False, fall back to keyword heuristic
@@ -67,9 +67,9 @@ async def filter_by_relevance(
         prompt = _build_relevance_prompt(relevance_prompt, url, title, snippet)
         batch_prompts.append(prompt)
     
-    # Use GlueLLM batching to evaluate all at once
+    # Use concurrent LLM calls to evaluate all at once
     try:
-        # GlueLLM's generate_batch or similar batching API
+        # Optional batching API on the client
         # Check if it has a batch method, otherwise fall back to individual calls
         if hasattr(llm_client, "generate_batch"):
             responses = await llm_client.generate_batch(batch_prompts, temperature=0.0)

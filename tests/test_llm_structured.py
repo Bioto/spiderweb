@@ -1,11 +1,11 @@
-"""Tests for gluellm structured_complete result unwrapping."""
+"""Tests for structured_complete result unwrapping (superglue-compatible shape)."""
 
 from types import SimpleNamespace
 
 import pytest
 from pydantic import BaseModel, Field
 
-from spiderweb.utils.gluellm_structured import model_from_structured_complete
+from spiderweb.utils.llm_structured import model_from_structured_complete
 
 
 class _Sample(BaseModel):

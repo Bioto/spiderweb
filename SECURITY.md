@@ -48,7 +48,7 @@ When using Spiderweb:
    - Encrypt stored conversation history
 
 4. **Dependencies**: Keep dependencies updated
-   - Regularly update `gluellm` and other dependencies
+   - Regularly update `superglue` and other dependencies
    - Review dependency security advisories
 
 5. **Network**: Use secure connections

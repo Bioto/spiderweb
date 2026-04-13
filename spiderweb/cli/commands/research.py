@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any
 
 import click
-from gluellm import GlueLLM
+from superglue import GlueLLM
 from rich.console import Console
 from rich.panel import Panel
 

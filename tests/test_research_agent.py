@@ -343,7 +343,7 @@ class TestSummarizeTracesInBatches:
 
 
 class TestCreateResearchPlan:
-    """Regression: gluellm structured_complete returns ExecutionResult, not the Pydantic model."""
+    """Regression: structured_complete returns a result object, not the Pydantic model."""
 
     def test_create_research_plan_unwraps_execution_result(self):
         expected = ResearchPlan(
@@ -354,7 +354,7 @@ class TestCreateResearchPlan:
         exec_like = SimpleNamespace(structured_output=expected, final_response="")
         mock_llm = MagicMock()
 
-        with patch("gluellm.api.structured_complete", new_callable=AsyncMock, return_value=exec_like):
+        with patch("superglue.structured_complete", new_callable=AsyncMock, return_value=exec_like):
             plan = asyncio.run(create_research_plan(mock_llm, goal="test goal"))
 
         assert plan.queries == ["q1", "q2"]

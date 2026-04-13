@@ -7,7 +7,7 @@ services to improve precision by scoring query-document relevance more accuratel
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from gluellm import GlueLLM
+    from superglue import GlueLLM
 
     from spiderweb.models.document import Chunk
 

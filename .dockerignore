@@ -51,7 +51,6 @@ Thumbs.db
 .cursor/
 
 # Project specific
-gluellm/
 uv.lock
 *.pdf
 _docs/

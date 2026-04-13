@@ -116,7 +116,7 @@ Most examples use default settings. To customize:
 
 ### Basic Ingestion
 ```python
-from gluellm import GlueLLM
+from superglue import GlueLLM
 from spiderweb import Spiderweb
 
 async with Spiderweb(llm_client=GlueLLM()) as web:

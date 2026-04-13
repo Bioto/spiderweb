@@ -6,7 +6,7 @@ Detects duplicate and near-duplicate chunks using embeddings.
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from gluellm import GlueLLM
+    from superglue import GlueLLM
 
 from spiderweb.models.config import ValidatorConfig
 from spiderweb.models.document import Chunk
@@ -24,7 +24,7 @@ class DedupValidator:
     for near-duplicates.
 
     Example:
-        >>> from gluellm import GlueLLM
+        >>> from superglue import GlueLLM
         >>> llm = GlueLLM()
         >>> validator = DedupValidator(llm_client=llm, threshold=0.95)
         >>> # Track seen chunks

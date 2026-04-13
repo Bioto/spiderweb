@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from gluellm import GlueLLM
+    from superglue import GlueLLM
 
 from spiderweb.loaders.directory_loader import DirectoryLoader
 from spiderweb.models.config import BatchConfig
@@ -29,7 +29,7 @@ class BatchProcessor:
     Handles concurrent processing of multiple documents with progress tracking.
 
     Example:
-        >>> from gluellm import GlueLLM
+        >>> from superglue import GlueLLM
         >>> from spiderweb.pipeline import BatchProcessor
         >>>
         >>> llm = GlueLLM()

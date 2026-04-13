@@ -201,7 +201,7 @@ Enable add-ons via `ChunkAddOnConfig`:
 ```python
 from spiderweb import Spiderweb
 from spiderweb.models.config import ChunkAddOnConfig
-from gluellm import GlueLLM
+from superglue import GlueLLM
 
 # Enable facts extraction
 config = ChunkAddOnConfig(enabled=["facts"])
@@ -537,7 +537,7 @@ from spiderweb import (
     ChunkerConfig,
 )
 from spiderweb.models.document import Document, Chunk
-from gluellm import GlueLLM
+from superglue import GlueLLM
 
 
 # 1. Register custom chunker

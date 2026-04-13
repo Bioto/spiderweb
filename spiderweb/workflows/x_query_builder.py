@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 from spiderweb.observability.logging_config import get_logger
 
 if TYPE_CHECKING:
-    from gluellm import GlueLLM
+    from superglue import GlueLLM
 
 logger = get_logger(__name__)
 

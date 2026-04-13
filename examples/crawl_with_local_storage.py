@@ -15,7 +15,7 @@ import asyncio
 import json
 from pathlib import Path
 
-from gluellm import GlueLLM
+from superglue import GlueLLM
 
 from spiderweb import Spiderweb
 from spiderweb.crawlers.storage import CrawlStorage

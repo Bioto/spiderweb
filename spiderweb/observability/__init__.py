@@ -1,6 +1,6 @@
 """Observability utilities for Spiderweb.
 
-This module provides logging configuration following gluellm patterns.
+This module provides logging configuration for Spiderweb.
 """
 
 from spiderweb.observability.logging_config import get_logger, setup_logging

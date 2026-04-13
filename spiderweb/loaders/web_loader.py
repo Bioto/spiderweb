@@ -8,7 +8,7 @@ import inspect
 from typing import TYPE_CHECKING, Union
 
 if TYPE_CHECKING:
-    from gluellm import GlueLLM
+    from superglue import GlueLLM
     from pydantic import BaseModel
 
 from spiderweb.crawlers.base import Crawler, CrawlResult

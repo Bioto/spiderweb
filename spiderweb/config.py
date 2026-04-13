@@ -1,7 +1,7 @@
 """Configuration management for Spiderweb.
 
 This module provides configuration management using pydantic-settings,
-following the same patterns as gluellm for consistency.
+following the same patterns as superglue for consistency.
 """
 
 import logging
@@ -53,7 +53,7 @@ class SpiderwebSettings(BaseSettings):
         description="Default overlap between chunks",
     )
 
-    # Embedding settings (delegated to gluellm)
+    # Embedding settings (OpenAI-compatible; used by superglue GlueLLM.embed)
     embedding_model: str = Field(
         default="openai/text-embedding-3-small",
         description="Default embedding model for semantic operations",
@@ -64,7 +64,7 @@ class SpiderwebSettings(BaseSettings):
     )
     model: str | None = Field(
         default="openai:gpt-5.1",
-        description="Default LLM model for chat/completion. Used by research and other LLM calls. When None, GlueLLM uses its own default.",
+        description="Default LLM model for chat/completion. Used by research and other LLM calls. When None, superglue.GlueLLM uses its built-in default.",
     )
     llm_timeout: float = Field(
         default=1800.0,

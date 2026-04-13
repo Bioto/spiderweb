@@ -103,7 +103,7 @@ Splits based on semantic similarity between text segments. Uses embeddings to de
 ```python
 from spiderweb import Spiderweb
 from spiderweb.models.config import ChunkerConfig
-from gluellm import GlueLLM
+from superglue import GlueLLM
 
 # Semantic chunking requires an LLM client for embeddings
 web = Spiderweb(
@@ -358,7 +358,7 @@ Instead of manually selecting a chunking strategy, you can use the adaptive chun
 
 ```python
 from spiderweb import Spiderweb
-from gluellm import GlueLLM
+from superglue import GlueLLM
 
 llm = GlueLLM()
 web = Spiderweb(llm_client=llm)

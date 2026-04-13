@@ -6,7 +6,7 @@ and querying them using Spiderweb.
 
 import asyncio
 
-from gluellm import GlueLLM
+from superglue import GlueLLM
 
 from spiderweb import Spiderweb
 

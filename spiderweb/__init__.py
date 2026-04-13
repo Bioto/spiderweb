@@ -8,14 +8,14 @@ applications that provides:
 - Quality validation and semantic deduplication
 - Pluggable vector storage (Qdrant, and more)
 - Batch processing for hundreds of thousands of files
-- Built on gluellm for LLM and embedding capabilities
+- Built on superglue for LLM and embedding capabilities
 - Extensible registry system for custom chunkers, crawlers, and extractors
 - Hook system for intercepting and modifying pipeline data
 
 Quick Start:
     >>> import asyncio
     >>> from spiderweb import ingest, query
-    >>> from gluellm import GlueLLM
+    >>> from superglue import GlueLLM
     >>>
     >>> async def main():
     ...     llm = GlueLLM()

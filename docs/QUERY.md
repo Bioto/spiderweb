@@ -25,7 +25,7 @@ Generates alternative phrasings of your query with different vocabulary and sent
 ```python
 from spiderweb import Spiderweb
 from spiderweb.models.config import QueryExpansionConfig
-from gluellm import GlueLLM
+from superglue import GlueLLM
 
 async with Spiderweb(llm_client=GlueLLM()) as web:
     result = await web.query(
@@ -272,7 +272,7 @@ spiderweb query "deployment process" \
 
 ```python
 import asyncio
-from gluellm import GlueLLM
+from superglue import GlueLLM
 from spiderweb import Spiderweb
 from spiderweb.models.config import QueryExpansionConfig, ContextWindowConfig
 

@@ -1,7 +1,7 @@
 """Logging configuration for Spiderweb.
 
 Provides structured logging with file rotation and optional JSON formatting,
-following the same patterns as gluellm.
+using structured console and rotating file handlers.
 """
 
 import logging

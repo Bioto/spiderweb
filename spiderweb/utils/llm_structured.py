@@ -1,4 +1,4 @@
-"""Unwrap Pydantic models from gluellm ``structured_complete`` (returns ``ExecutionResult``)."""
+"""Unwrap Pydantic models from ``structured_complete`` results (superglue-compatible shape)."""
 
 import json
 from typing import Any, TypeVar
@@ -11,8 +11,9 @@ TModel = TypeVar("TModel", bound=BaseModel)
 def model_from_structured_complete(result: Any, model_cls: type[TModel]) -> TModel:
     """Return ``model_cls`` instance from a ``structured_complete`` result.
 
-    gluellm returns ``ExecutionResult`` with the parsed model in ``structured_output``.
-    Falls back to parsing ``final_response`` as JSON (including fenced blocks).
+    Expects ``structured_output`` (parsed model or dict) and/or ``final_response``
+    (raw JSON string). Falls back to parsing ``final_response`` as JSON
+    (including fenced blocks).
     """
     structured = getattr(result, "structured_output", None)
     if isinstance(structured, model_cls):

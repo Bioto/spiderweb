@@ -9,7 +9,7 @@ from collections import defaultdict
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from gluellm import GlueLLM
+    from superglue import GlueLLM
 
 from spiderweb.models.config import ContextWindowConfig
 from spiderweb.models.document import Chunk

@@ -54,7 +54,7 @@ class TestChooseChunkingStrategy:
             return SimpleNamespace(structured_output=mock_choice, final_response="")
 
         mock_llm = AsyncMock()
-        with patch("gluellm.api.structured_complete", side_effect=mock_structured_complete):
+        with patch("spiderweb.chunking_agent.structured_complete", side_effect=mock_structured_complete):
             choice = await choose_chunking_strategy(
                 llm_client=mock_llm,
                 document_preview="# Introduction\n\nThis is a markdown document.",
@@ -207,7 +207,7 @@ class TestAdaptiveChunkingIntegration:
         """Test adaptive chunking with mocked LLM."""
         from unittest.mock import AsyncMock, MagicMock
 
-        from gluellm import GlueLLM
+        from superglue import GlueLLM
         from spiderweb import Spiderweb
 
         # Create a test markdown file

@@ -9,7 +9,7 @@ Demonstrates:
 
 import asyncio
 from pydantic import BaseModel, Field
-from gluellm import GlueLLM
+from superglue import GlueLLM
 from spiderweb import Spiderweb
 from spiderweb.models.config import (
     ResearchAgentConfig,

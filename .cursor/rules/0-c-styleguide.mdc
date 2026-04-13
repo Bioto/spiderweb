@@ -214,13 +214,13 @@ import aiohttp
 from pydantic import BaseModel
 
 # Local imports
-from gluellm.config import Config
-from gluellm.models.workflow import Workflow
+from spiderweb.api import Spiderweb
+from spiderweb.config import settings
 ```
 
 ## Project-Specific Patterns
 
-### For GlueLLM
+### For superglue (LLM client)
 - Workflows should be composable and chainable
 - Use hooks for cross-cutting concerns (logging, metrics, tracing)
 - Async by default for I/O operations

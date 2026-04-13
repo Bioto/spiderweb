@@ -6,7 +6,7 @@ Coordinates quality checking, deduplication, and optional LLM validation.
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from gluellm import GlueLLM
+    from superglue import GlueLLM
 
 from spiderweb.models.config import ValidatorConfig
 from spiderweb.models.document import Chunk
@@ -24,7 +24,7 @@ class ValidationPipeline:
     Orchestrates quality checking, deduplication, and optional LLM validation.
 
     Example:
-        >>> from gluellm import GlueLLM
+        >>> from superglue import GlueLLM
         >>> llm = GlueLLM()
         >>> pipeline = ValidationPipeline(llm_client=llm)
         >>> results = await pipeline.validate_batch(chunks)

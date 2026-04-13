@@ -34,7 +34,7 @@ async def main() -> None:
     if use_ocr:
         print("  OCR: enabled")
 
-    from gluellm import GlueLLM
+    from superglue import GlueLLM
     from spiderweb import Spiderweb
     from spiderweb.models.config import ChunkAddOnConfig
 

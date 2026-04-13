@@ -153,7 +153,7 @@ spiderweb crawl https://example.com \
 
 ```python
 from spiderweb import Spiderweb
-from gluellm import GlueLLM
+from superglue import GlueLLM
 
 async with Spiderweb(llm_client=GlueLLM()) as web:
     # Basic save

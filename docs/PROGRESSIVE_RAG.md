@@ -90,7 +90,7 @@ spiderweb progressive-query "What is the revenue?" \
 
 ```python
 import asyncio
-from gluellm import GlueLLM
+from superglue import GlueLLM
 from spiderweb import Spiderweb
 from spiderweb.models.config import ChunkerConfig
 from spiderweb.models.progressive import ProgressiveRAGConfig, SummaryStrategy
@@ -344,7 +344,7 @@ result = await processor.query(
 ```python
 import asyncio
 from pathlib import Path
-from gluellm import GlueLLM
+from superglue import GlueLLM
 from spiderweb import Spiderweb
 from spiderweb.models.config import ChunkerConfig, ContextWindowConfig
 from spiderweb.models.progressive import ProgressiveRAGConfig, SummaryStrategy

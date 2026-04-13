@@ -36,8 +36,8 @@ classifiers = [
 ]
 
 dependencies = [
-    # Core LLM and embedding capabilities
-    "gluellm>=1.2.5",
+    # Core LLM and embedding capabilities (Rust-backed + OpenAI embeddings)
+    "superglue-py",
     # Document processing
     "markitdown[all]>=0.0.1a2",
     "aiofiles>=24.1.0",
@@ -144,6 +144,9 @@ namespaces = false
 [project.scripts]
 spiderweb = "spiderweb.cli:cli"
 
+[tool.uv.sources]
+superglue-py = { path = "../superglue-py", editable = true }
+
 [tool.ruff]
 target-version = "py312"
 include = ["spiderweb/**/*.py", "tests/**/*.py", "examples/**/*.py"]
@@ -155,7 +158,6 @@ exclude = [
     "*.egg-info",
     ".pytest_cache",
     ".ruff_cache",
-    "gluellm",  # Exclude the gluellm directory
 ]
 line-length = 120
 
@@ -190,7 +192,7 @@ ignore = [
 "tests/**/*.py" = ["T201", "F841", "E402", "SIM108"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["spiderweb"]
+known-first-party = ["spiderweb", "superglue"]
 
 [tool.ruff.format]
 quote-style = "double"

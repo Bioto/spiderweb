@@ -3,7 +3,7 @@
 import asyncio
 
 import click
-from gluellm import GlueLLM
+from superglue import GlueLLM
 from rich.console import Console
 from rich.table import Table
 

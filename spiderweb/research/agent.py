@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
 
 if TYPE_CHECKING:
-    from gluellm import GlueLLM
+    from superglue import GlueLLM
 
 from spiderweb.config import settings
 from spiderweb.observability.logging_config import get_logger
@@ -31,8 +31,9 @@ from spiderweb.research.models import (
 )
 from spiderweb.research.storage import ResearchContentStore
 from spiderweb.search.trace import SearchCrawlTrace
-from spiderweb.utils.gluellm_structured import model_from_structured_complete
+from spiderweb.utils.llm_structured import model_from_structured_complete
 from spiderweb.utils.path_utils import sanitize_query_for_path
+from superglue import structured_complete
 
 logger = get_logger(__name__)
 
@@ -176,8 +177,6 @@ Set passed=false when there is at least one FAIL.
 Do NOT invent facts. If a field is null or empty for that aspect of the rule, use UNKNOWN, not FAIL."""
 
         try:
-            from gluellm.api import structured_complete
-
             raw = await structured_complete(
                 user_message=prompt,
                 response_format=ItemValidationBatch,
@@ -279,8 +278,6 @@ Page content:
 ---
 """
     try:
-        from gluellm.api import structured_complete
-
         raw = await structured_complete(
             user_message=prompt,
             response_format=ListingExtractionPayload,
@@ -619,7 +616,6 @@ Return a JSON object with:
 JSON object:"""
     try:
         try:
-            from gluellm.api import structured_complete
             raw = await structured_complete(
                 user_message=prompt,
                 response_format=ExpansionDecision,
@@ -930,7 +926,6 @@ You have access to web search and web crawling. Create a research plan with:
 
 Queries should be diverse and maximize coverage."""
     try:
-        from gluellm.api import structured_complete
         raw = await structured_complete(
             user_message=prompt,
             response_format=ResearchPlan,
@@ -1100,8 +1095,6 @@ JSON object:"""
 
     try:
         try:
-            from gluellm.api import structured_complete
-
             raw = await structured_complete(
                 user_message=prompt,
                 response_format=RoundReflection,

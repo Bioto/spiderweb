@@ -18,7 +18,7 @@ The research agent combines:
 
 ```python
 from spiderweb import Spiderweb
-from gluellm import GlueLLM
+from superglue import GlueLLM
 from spiderweb.models.config import ResearchAgentConfig
 
 async with Spiderweb(llm_client=GlueLLM()) as web:

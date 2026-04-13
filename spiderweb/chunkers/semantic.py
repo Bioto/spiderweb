@@ -6,7 +6,7 @@ Splits documents based on semantic similarity between text segments.
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from gluellm import GlueLLM
+    from superglue import GlueLLM
 
 from spiderweb.chunkers.base import split_into_sentences
 from spiderweb.models.config import ChunkerConfig
@@ -23,10 +23,10 @@ class SemanticChunker:
     Uses embeddings to determine when the topic/context changes significantly,
     creating natural semantic boundaries for chunks.
 
-    Requires gluellm for embedding generation.
+    Requires an LLM client with ``embed()`` for embedding generation.
 
     Example:
-        >>> from gluellm import GlueLLM
+        >>> from superglue import GlueLLM
         >>> llm_client = GlueLLM()
         >>> chunker = SemanticChunker(llm_client=llm_client, threshold=0.7)
         >>> chunks = await chunker.chunk_async(document)

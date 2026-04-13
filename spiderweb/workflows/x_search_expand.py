@@ -19,7 +19,7 @@ ProgressCallback = Callable[[str, int | None, int | None, str | None], None]
 from spiderweb.crawlers.base import CrawlResult
 
 if TYPE_CHECKING:
-    from gluellm import GlueLLM
+    from superglue import GlueLLM
     from spiderweb.models.result import BatchIngestionResult
 from spiderweb.crawlers.x import XCrawler, XUserScrapeResult, username_from_tweet_url
 from spiderweb.models.config import CrawlerConfig, XScraperConfig

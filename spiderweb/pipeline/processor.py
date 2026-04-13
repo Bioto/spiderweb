@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from gluellm import GlueLLM
+    from superglue import GlueLLM
 
     from spiderweb.chunkers.base import Chunker
     from spiderweb.extractors.base import Extractor
@@ -41,7 +41,7 @@ class DocumentProcessor:
     Orchestrates the full pipeline: extraction → chunking → validation → embedding → storage
 
     Example:
-        >>> from gluellm import GlueLLM
+        >>> from superglue import GlueLLM
         >>> from spiderweb.pipeline import DocumentProcessor
         >>>
         >>> llm = GlueLLM()

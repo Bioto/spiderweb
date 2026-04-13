@@ -75,7 +75,7 @@ console = Console()
     "--expand-query",
     is_flag=True,
     default=False,
-    help="Use GlueLLM to rewrite the search term into an X Search API query (hashtags, filters, etc.)",
+    help="Use the LLM to rewrite the search term into an X Search API query (hashtags, filters, etc.)",
 )
 @click.option(
     "--chunk-add-on",
@@ -206,7 +206,7 @@ async def _x_search_expand(
 
     try:
         if expand_query:
-            from gluellm import GlueLLM
+            from superglue import GlueLLM
             from spiderweb.api import Spiderweb
             llm = GlueLLM()
             web = Spiderweb(llm_client=llm)
@@ -308,7 +308,7 @@ async def _x_search_expand(
 
     if ingest and result.all_crawl_results:
         from spiderweb.api import Spiderweb
-        from gluellm import GlueLLM
+        from superglue import GlueLLM
 
         console.print("[cyan]Ingesting into vector store...[/cyan]")
         llm = GlueLLM()
